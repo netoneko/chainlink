@@ -4,9 +4,10 @@ use std::fs;
 use std::path::Path;
 
 use super::export::{ExportData, ExportedIssue};
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
-pub fn run_json(db: &Database, input_path: &Path) -> Result<()> {
+pub fn run_json<B: DatabaseBackend>(db: &Database<B>, input_path: &Path) -> Result<()> {
     let content = fs::read_to_string(input_path).context("Failed to read import file")?;
 
     let data: ExportData = serde_json::from_str(&content).context("Failed to parse JSON")?;
@@ -25,7 +26,7 @@ pub fn run_json(db: &Database, input_path: &Path) -> Result<()> {
 
         // First pass: create all issues without parent relationships
         for issue in &data.issues {
-            let new_id = import_issue(db, issue, None)?;
+            let new_id = import_issue_internal(db, issue, None)?;
             id_map.insert(issue.id, new_id);
         }
 
@@ -42,13 +43,13 @@ pub fn run_json(db: &Database, input_path: &Path) -> Result<()> {
         }
 
         Ok(data.issues.len())
-    })?;
+    }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     println!("Successfully imported {} issues", count);
     Ok(())
 }
 
-fn import_issue(db: &Database, issue: &ExportedIssue, parent_id: Option<i64>) -> Result<i64> {
+fn import_issue_internal<B: DatabaseBackend>(db: &Database<B>, issue: &ExportedIssue, parent_id: Option<i64>) -> chainlink::db::Result<i64> {
     let id = if let Some(pid) = parent_id {
         db.create_subissue(
             pid,
@@ -81,15 +82,16 @@ fn import_issue(db: &Database, issue: &ExportedIssue, parent_id: Option<i64>) ->
 
 #[cfg(test)]
 mod tests {
-    use super::super::export::{ExportData, ExportedComment, ExportedIssue};
+    use super::super::export::{ExportData, ExportedIssue};
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

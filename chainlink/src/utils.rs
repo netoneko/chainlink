@@ -1,3 +1,9 @@
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
+
+#[cfg(not(feature = "std"))]
+use alloc::format;
+
 /// Truncate a string to a maximum number of characters, adding "..." if truncated.
 /// Handles Unicode correctly by counting characters, not bytes.
 pub fn truncate(s: &str, max_chars: usize) -> String {

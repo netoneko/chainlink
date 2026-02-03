@@ -1,9 +1,10 @@
 use anyhow::{bail, Result};
 use chrono::Utc;
 
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
-pub fn start(db: &Database) -> Result<()> {
+pub fn start<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
     // Check if there's already an active session
     if let Some(current) = db.get_current_session()? {
         println!(
@@ -35,7 +36,7 @@ pub fn start(db: &Database) -> Result<()> {
     Ok(())
 }
 
-pub fn end(db: &Database, notes: Option<&str>) -> Result<()> {
+pub fn end<B: DatabaseBackend>(db: &Database<B>, notes: Option<&str>) -> Result<()> {
     let session = match db.get_current_session()? {
         Some(s) => s,
         None => bail!("No active session"),
@@ -49,7 +50,7 @@ pub fn end(db: &Database, notes: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub fn status(db: &Database) -> Result<()> {
+pub fn status<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
     let session = match db.get_current_session()? {
         Some(s) => s,
         None => {
@@ -81,7 +82,7 @@ pub fn status(db: &Database) -> Result<()> {
     Ok(())
 }
 
-pub fn work(db: &Database, issue_id: i64) -> Result<()> {
+pub fn work<B: DatabaseBackend>(db: &Database<B>, issue_id: i64) -> Result<()> {
     let session = match db.get_current_session()? {
         Some(s) => s,
         None => bail!("No active session. Use 'chainlink session start' first."),
@@ -97,7 +98,7 @@ pub fn work(db: &Database, issue_id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn last_handoff(db: &Database) -> Result<()> {
+pub fn last_handoff<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
     match db.get_last_session()? {
         Some(session) => {
             if let Some(notes) = &session.handoff_notes {
@@ -118,13 +119,14 @@ pub fn last_handoff(db: &Database) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

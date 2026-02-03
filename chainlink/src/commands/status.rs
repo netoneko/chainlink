@@ -2,9 +2,10 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::Path;
 
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
-pub fn close(db: &Database, id: i64, update_changelog: bool, chainlink_dir: &Path) -> Result<()> {
+pub fn close<B: DatabaseBackend>(db: &Database<B>, id: i64, update_changelog: bool, chainlink_dir: &Path) -> Result<()> {
     // Get issue details before closing
     let issue = db.get_issue(id)?;
     let issue = match issue {
@@ -125,7 +126,7 @@ fn append_to_changelog(path: &Path, category: &str, entry: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn reopen(db: &Database, id: i64) -> Result<()> {
+pub fn reopen<B: DatabaseBackend>(db: &Database<B>, id: i64) -> Result<()> {
     if db.reopen_issue(id)? {
         println!("Reopened issue #{}", id);
     } else {
@@ -137,13 +138,14 @@ pub fn reopen(db: &Database, id: i64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

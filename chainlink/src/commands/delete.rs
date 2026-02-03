@@ -1,9 +1,10 @@
 use anyhow::{bail, Result};
 use std::io::{self, Write};
 
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
-pub fn run(db: &Database, id: i64, force: bool) -> Result<()> {
+pub fn run<B: DatabaseBackend>(db: &Database<B>, id: i64, force: bool) -> Result<()> {
     // Check if issue exists first
     let issue = match db.get_issue(id)? {
         Some(i) => i,
@@ -34,20 +35,21 @@ pub fn run(db: &Database, id: i64, force: bool) -> Result<()> {
 
 /// Internal function for testing without stdin interaction
 #[cfg(test)]
-pub fn run_force(db: &Database, id: i64) -> Result<()> {
+pub fn run_force<B: DatabaseBackend>(db: &Database<B>, id: i64) -> Result<()> {
     run(db, id, true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

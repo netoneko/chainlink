@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
 const VALID_PRIORITIES: [&str; 4] = ["low", "medium", "high", "critical"];
 
@@ -51,8 +52,8 @@ pub fn validate_priority(priority: &str) -> bool {
     VALID_PRIORITIES.contains(&priority)
 }
 
-pub fn run(
-    db: &Database,
+pub fn run<B: DatabaseBackend>(
+    db: &Database<B>,
     title: &str,
     description: Option<&str>,
     priority: &str,
@@ -113,8 +114,8 @@ pub fn run(
     Ok(())
 }
 
-pub fn run_subissue(
-    db: &Database,
+pub fn run_subissue<B: DatabaseBackend>(
+    db: &Database<B>,
     parent_id: i64,
     title: &str,
     description: Option<&str>,

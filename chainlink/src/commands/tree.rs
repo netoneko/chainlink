@@ -1,7 +1,8 @@
 use anyhow::Result;
 
-use crate::db::Database;
-use crate::models::Issue;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
+use chainlink::models::Issue;
 
 fn status_icon(status: &str) -> &'static str {
     match status {
@@ -20,7 +21,7 @@ fn print_issue(issue: &Issue, indent: usize) {
     );
 }
 
-fn print_tree_recursive(db: &Database, parent_id: i64, indent: usize) -> Result<()> {
+fn print_tree_recursive<B: DatabaseBackend>(db: &Database<B>, parent_id: i64, indent: usize) -> Result<()> {
     let subissues = db.get_subissues(parent_id)?;
     for sub in subissues {
         print_issue(&sub, indent);
@@ -29,7 +30,7 @@ fn print_tree_recursive(db: &Database, parent_id: i64, indent: usize) -> Result<
     Ok(())
 }
 
-pub fn run(db: &Database, status_filter: Option<&str>) -> Result<()> {
+pub fn run<B: DatabaseBackend>(db: &Database<B>, status_filter: Option<&str>) -> Result<()> {
     // Get all top-level issues (no parent)
     let all_issues = db.list_issues(status_filter, None, None)?;
     let top_level: Vec<_> = all_issues
@@ -57,13 +58,14 @@ pub fn run(db: &Database, status_filter: Option<&str>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

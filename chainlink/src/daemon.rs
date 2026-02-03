@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use crate::db::Database;
+use chainlink::backend::RusqliteBackend;
+use chainlink::db::Database;
 
 const FLUSH_INTERVAL_SECS: u64 = 30;
 
@@ -161,7 +162,7 @@ pub fn run_daemon(chainlink_dir: &Path) -> Result<()> {
         }
 
         // Auto-flush: read current session and write to session.json
-        if let Ok(db) = Database::open(&db_path) {
+        if let Ok(db) = Database::<RusqliteBackend>::open(db_path.to_str().unwrap_or("")) {
             if let Ok(Some(session)) = db.get_current_session() {
                 let session_data = serde_json::json!({
                     "session_id": session.id,

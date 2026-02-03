@@ -1,8 +1,9 @@
 use anyhow::{bail, Result};
 
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
-pub fn archive(db: &Database, id: i64) -> Result<()> {
+pub fn archive<B: DatabaseBackend>(db: &Database<B>, id: i64) -> Result<()> {
     let issue = match db.get_issue(id)? {
         Some(i) => i,
         None => bail!("Issue #{} not found", id),
@@ -25,7 +26,7 @@ pub fn archive(db: &Database, id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn unarchive(db: &Database, id: i64) -> Result<()> {
+pub fn unarchive<B: DatabaseBackend>(db: &Database<B>, id: i64) -> Result<()> {
     if db.unarchive_issue(id)? {
         println!("Unarchived issue #{} (now closed)", id);
     } else {
@@ -35,7 +36,7 @@ pub fn unarchive(db: &Database, id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn list(db: &Database) -> Result<()> {
+pub fn list<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
     let issues = db.list_archived_issues()?;
 
     if issues.is_empty() {
@@ -58,7 +59,7 @@ pub fn list(db: &Database) -> Result<()> {
     Ok(())
 }
 
-pub fn archive_older(db: &Database, days: i64) -> Result<()> {
+pub fn archive_older<B: DatabaseBackend>(db: &Database<B>, days: i64) -> Result<()> {
     let count = db.archive_older_than(days)?;
     if count > 0 {
         println!(
@@ -78,13 +79,14 @@ pub fn archive_older(db: &Database, days: i64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

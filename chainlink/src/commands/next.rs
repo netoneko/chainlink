@@ -1,7 +1,8 @@
 use anyhow::Result;
 
-use crate::db::Database;
-use crate::models::Issue;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
+use chainlink::models::Issue;
 
 /// Progress tuple: (completed subissues, total subissues)
 type Progress = Option<(i32, i32)>;
@@ -21,7 +22,7 @@ fn priority_weight(priority: &str) -> i32 {
 }
 
 /// Calculate progress for issues with subissues
-fn calculate_progress(db: &Database, issue: &Issue) -> Result<Progress> {
+fn calculate_progress<B: DatabaseBackend>(db: &Database<B>, issue: &Issue) -> Result<Progress> {
     let subissues = db.get_subissues(issue.id)?;
     if subissues.is_empty() {
         return Ok(None);
@@ -32,7 +33,7 @@ fn calculate_progress(db: &Database, issue: &Issue) -> Result<Progress> {
     Ok(Some((closed, total)))
 }
 
-pub fn run(db: &Database) -> Result<()> {
+pub fn run<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
     let ready = db.list_ready_issues()?;
 
     if ready.is_empty() {
@@ -123,13 +124,14 @@ pub fn run(db: &Database) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-use crate::db::Database;
+use chainlink::backend::RusqliteBackend;
+use chainlink::db::Database;
 
 // Embed hook files at compile time
 // Path: chainlink/src/commands/init.rs -> ../../../.claude/
@@ -95,7 +96,7 @@ pub fn run(path: &Path, force: bool) -> Result<()> {
         fs::create_dir_all(&chainlink_dir).context("Failed to create .chainlink directory")?;
 
         let db_path = chainlink_dir.join("issues.db");
-        Database::open(&db_path)?;
+        Database::<RusqliteBackend>::open(db_path.to_str().unwrap_or(""))?;
         println!("Created {}", chainlink_dir.display());
     }
 
@@ -164,6 +165,7 @@ pub fn run(path: &Path, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use tempfile::tempdir;
 
     #[test]
@@ -277,7 +279,7 @@ mod tests {
 
         // Open the created database and verify it works
         let db_path = dir.path().join(".chainlink/issues.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::<RusqliteBackend>::open(db_path.to_str().unwrap()).unwrap();
 
         // Should be able to create an issue
         let id = db.create_issue("Test issue", None, "medium").unwrap();

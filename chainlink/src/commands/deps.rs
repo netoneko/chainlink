@@ -1,9 +1,10 @@
 use anyhow::{bail, Result};
 
-use crate::db::Database;
-use crate::utils::truncate;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
+use chainlink::utils::truncate;
 
-pub fn block(db: &Database, issue_id: i64, blocker_id: i64) -> Result<()> {
+pub fn block<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, blocker_id: i64) -> Result<()> {
     // Check if both issues exist
     db.require_issue(issue_id)?;
     db.require_issue(blocker_id)?;
@@ -20,7 +21,7 @@ pub fn block(db: &Database, issue_id: i64, blocker_id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn unblock(db: &Database, issue_id: i64, blocker_id: i64) -> Result<()> {
+pub fn unblock<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, blocker_id: i64) -> Result<()> {
     if db.remove_dependency(issue_id, blocker_id)? {
         println!(
             "Removed: #{} no longer blocked by #{}",
@@ -32,7 +33,7 @@ pub fn unblock(db: &Database, issue_id: i64, blocker_id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn list_blocked(db: &Database) -> Result<()> {
+pub fn list_blocked<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
     let issues = db.list_blocked_issues()?;
 
     if issues.is_empty() {
@@ -55,7 +56,7 @@ pub fn list_blocked(db: &Database) -> Result<()> {
     Ok(())
 }
 
-pub fn list_ready(db: &Database) -> Result<()> {
+pub fn list_ready<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
     let issues = db.list_ready_issues()?;
 
     if issues.is_empty() {
@@ -74,13 +75,14 @@ pub fn list_ready(db: &Database) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

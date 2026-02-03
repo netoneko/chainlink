@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Write};
 
-use crate::db::Database;
-use crate::models::Issue;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
+use chainlink::models::Issue;
 
 #[derive(Serialize, Deserialize)]
 pub struct ExportedIssue {
@@ -34,7 +35,7 @@ pub struct ExportData {
     pub issues: Vec<ExportedIssue>,
 }
 
-fn export_issue(db: &Database, issue: &Issue) -> Result<ExportedIssue> {
+fn export_issue<B: DatabaseBackend>(db: &Database<B>, issue: &Issue) -> Result<ExportedIssue> {
     let labels = db.get_labels(issue.id)?;
     let comments = db.get_comments(issue.id)?;
 
@@ -59,7 +60,7 @@ fn export_issue(db: &Database, issue: &Issue) -> Result<ExportedIssue> {
     })
 }
 
-pub fn run_json(db: &Database, output_path: Option<&str>) -> Result<()> {
+pub fn run_json<B: DatabaseBackend>(db: &Database<B>, output_path: Option<&str>) -> Result<()> {
     let issues = db.list_issues(Some("all"), None, None)?;
 
     let exported: Vec<ExportedIssue> = issues
@@ -88,7 +89,7 @@ pub fn run_json(db: &Database, output_path: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub fn run_markdown(db: &Database, output_path: Option<&str>) -> Result<()> {
+pub fn run_markdown<B: DatabaseBackend>(db: &Database<B>, output_path: Option<&str>) -> Result<()> {
     let issues = db.list_issues(Some("all"), None, None)?;
     let mut md = String::new();
 
@@ -129,7 +130,7 @@ pub fn run_markdown(db: &Database, output_path: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn write_issue_md(md: &mut String, db: &Database, issue: &Issue) -> Result<()> {
+fn write_issue_md<B: DatabaseBackend>(md: &mut String, db: &Database<B>, issue: &Issue) -> Result<()> {
     let checkbox = if issue.status == "closed" {
         "[x]"
     } else {
@@ -182,13 +183,14 @@ fn write_issue_md(md: &mut String, db: &Database, issue: &Issue) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

@@ -1,14 +1,15 @@
 use anyhow::{bail, Result};
 
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
-pub fn create(db: &Database, name: &str, description: Option<&str>) -> Result<()> {
+pub fn create<B: DatabaseBackend>(db: &Database<B>, name: &str, description: Option<&str>) -> Result<()> {
     let id = db.create_milestone(name, description)?;
     println!("Created milestone #{}: {}", id, name);
     Ok(())
 }
 
-pub fn list(db: &Database, status: Option<&str>) -> Result<()> {
+pub fn list<B: DatabaseBackend>(db: &Database<B>, status: Option<&str>) -> Result<()> {
     let milestones = db.list_milestones(status)?;
 
     if milestones.is_empty() {
@@ -33,7 +34,7 @@ pub fn list(db: &Database, status: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub fn show(db: &Database, id: i64) -> Result<()> {
+pub fn show<B: DatabaseBackend>(db: &Database<B>, id: i64) -> Result<()> {
     let m = match db.get_milestone(id)? {
         Some(m) => m,
         None => bail!("Milestone #{} not found", id),
@@ -75,7 +76,7 @@ pub fn show(db: &Database, id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn add(db: &Database, milestone_id: i64, issue_ids: &[i64]) -> Result<()> {
+pub fn add<B: DatabaseBackend>(db: &Database<B>, milestone_id: i64, issue_ids: &[i64]) -> Result<()> {
     let milestone = db.get_milestone(milestone_id)?;
     if milestone.is_none() {
         bail!("Milestone #{} not found", milestone_id);
@@ -97,7 +98,7 @@ pub fn add(db: &Database, milestone_id: i64, issue_ids: &[i64]) -> Result<()> {
     Ok(())
 }
 
-pub fn remove(db: &Database, milestone_id: i64, issue_id: i64) -> Result<()> {
+pub fn remove<B: DatabaseBackend>(db: &Database<B>, milestone_id: i64, issue_id: i64) -> Result<()> {
     if db.remove_issue_from_milestone(milestone_id, issue_id)? {
         println!("Removed #{} from milestone #{}", issue_id, milestone_id);
     } else {
@@ -107,7 +108,7 @@ pub fn remove(db: &Database, milestone_id: i64, issue_id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn close(db: &Database, id: i64) -> Result<()> {
+pub fn close<B: DatabaseBackend>(db: &Database<B>, id: i64) -> Result<()> {
     if db.close_milestone(id)? {
         println!("Closed milestone #{}", id);
     } else {
@@ -117,7 +118,7 @@ pub fn close(db: &Database, id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn delete(db: &Database, id: i64) -> Result<()> {
+pub fn delete<B: DatabaseBackend>(db: &Database<B>, id: i64) -> Result<()> {
     if db.delete_milestone(id)? {
         println!("Deleted milestone #{}", id);
     } else {
@@ -130,13 +131,14 @@ pub fn delete(db: &Database, id: i64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

@@ -1,10 +1,11 @@
 use anyhow::{bail, Result};
 
 use crate::commands::create::validate_priority;
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
-pub fn run(
-    db: &Database,
+pub fn run<B: DatabaseBackend>(
+    db: &Database<B>,
     id: i64,
     title: Option<&str>,
     description: Option<&str>,
@@ -35,13 +36,14 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

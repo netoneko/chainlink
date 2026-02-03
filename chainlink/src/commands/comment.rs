@@ -1,8 +1,9 @@
 use anyhow::Result;
 
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
-pub fn run(db: &Database, issue_id: i64, content: &str) -> Result<()> {
+pub fn run<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, content: &str) -> Result<()> {
     db.require_issue(issue_id)?;
     db.add_comment(issue_id, content)?;
     println!("Added comment to issue #{}", issue_id);
@@ -12,13 +13,14 @@ pub fn run(db: &Database, issue_id: i64, content: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

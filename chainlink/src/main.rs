@@ -1,15 +1,13 @@
 mod commands;
 mod daemon;
-mod db;
-mod models;
-mod utils;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::env;
 use std::path::PathBuf;
 
-use db::Database;
+use chainlink::backend::RusqliteBackend;
+use chainlink::db::Database;
 
 #[derive(Parser)]
 #[command(name = "chainlink")]
@@ -376,10 +374,11 @@ fn find_chainlink_dir() -> Result<PathBuf> {
     }
 }
 
-fn get_db() -> Result<Database> {
+fn get_db() -> Result<Database<RusqliteBackend>> {
     let chainlink_dir = find_chainlink_dir()?;
     let db_path = chainlink_dir.join("issues.db");
-    Database::open(&db_path).context("Failed to open database")
+    let path_str = db_path.to_str().context("Invalid path")?;
+    Database::open(path_str).map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 fn main() -> Result<()> {

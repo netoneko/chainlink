@@ -1,8 +1,9 @@
 use anyhow::{bail, Result};
 
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
-pub fn run(db: &Database, id: i64) -> Result<()> {
+pub fn run<B: DatabaseBackend>(db: &Database<B>, id: i64) -> Result<()> {
     let issue = match db.get_issue(id)? {
         Some(i) => i,
         None => bail!("Issue #{} not found", id),
@@ -105,13 +106,14 @@ pub fn run(db: &Database, id: i64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 

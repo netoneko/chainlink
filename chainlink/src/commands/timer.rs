@@ -1,9 +1,10 @@
 use anyhow::{bail, Result};
 use chrono::Utc;
 
-use crate::db::Database;
+use chainlink::backend::DatabaseBackend;
+use chainlink::db::Database;
 
-pub fn start(db: &Database, issue_id: i64) -> Result<()> {
+pub fn start<B: DatabaseBackend>(db: &Database<B>, issue_id: i64) -> Result<()> {
     // Verify issue exists
     let issue = match db.get_issue(issue_id)? {
         Some(i) => i,
@@ -29,7 +30,7 @@ pub fn start(db: &Database, issue_id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn stop(db: &Database) -> Result<()> {
+pub fn stop<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
     let (issue_id, started_at) = match db.get_active_timer()? {
         Some(a) => a,
         None => bail!("No timer running. Start one with 'chainlink start <id>'."),
@@ -62,7 +63,7 @@ pub fn stop(db: &Database) -> Result<()> {
     Ok(())
 }
 
-pub fn status(db: &Database) -> Result<()> {
+pub fn status<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
     let active = db.get_active_timer()?;
 
     match active {
@@ -91,13 +92,14 @@ pub fn status(db: &Database) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chainlink::backend::RusqliteBackend;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
-    fn setup_test_db() -> (Database, tempfile::TempDir) {
+    fn setup_test_db() -> (Database<RusqliteBackend>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
+        let db = Database::open(db_path.to_str().unwrap()).unwrap();
         (db, dir)
     }
 
