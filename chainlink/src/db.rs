@@ -24,6 +24,34 @@ use crate::models::{Comment, Issue, Milestone, Session};
 
 const SCHEMA_VERSION: i32 = 7;
 
+// Timestamp helper for no_std environments
+#[cfg(feature = "std")]
+fn current_timestamp() -> DateTime<Utc> {
+    Utc::now()
+}
+
+#[cfg(not(feature = "std"))]
+fn current_timestamp() -> DateTime<Utc> {
+    // Use a static counter to provide ordering in no_std mode
+    use core::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let secs = COUNTER.fetch_add(1, Ordering::SeqCst) as i64;
+    // Create a DateTime from Unix timestamp (starting from 2024-01-01)
+    DateTime::from_timestamp(1704067200 + secs, 0).unwrap_or_else(|| {
+        DateTime::from_timestamp(1704067200, 0).unwrap()
+    })
+}
+
+#[cfg(feature = "std")]
+fn default_timestamp() -> DateTime<Utc> {
+    Utc::now()
+}
+
+#[cfg(not(feature = "std"))]
+fn default_timestamp() -> DateTime<Utc> {
+    DateTime::from_timestamp(1704067200, 0).unwrap()
+}
+
 /// Database wrapper that provides high-level issue tracking operations
 pub struct Database<B: DatabaseBackend> {
     backend: B,
@@ -283,7 +311,7 @@ impl<B: DatabaseBackend> Database<B> {
         priority: &str,
         parent_id: Option<i64>,
     ) -> Result<i64> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "INSERT INTO issues (title, description, priority, parent_id, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?5)",
             &[
@@ -370,7 +398,7 @@ impl<B: DatabaseBackend> Database<B> {
         description: Option<&str>,
         priority: Option<&str>,
     ) -> Result<bool> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let mut updates = vec!["updated_at = ?1".to_string()];
         let mut params: Vec<Value> = vec![Value::Text(now)];
 
@@ -401,7 +429,7 @@ impl<B: DatabaseBackend> Database<B> {
     }
 
     pub fn close_issue(&self, id: i64) -> Result<bool> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "UPDATE issues SET status = 'closed', closed_at = ?1, updated_at = ?1 WHERE id = ?2",
             &[Value::Text(now), Value::Integer(id)],
@@ -410,7 +438,7 @@ impl<B: DatabaseBackend> Database<B> {
     }
 
     pub fn reopen_issue(&self, id: i64) -> Result<bool> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "UPDATE issues SET status = 'open', closed_at = NULL, updated_at = ?1 WHERE id = ?2",
             &[Value::Text(now), Value::Integer(id)],
@@ -458,7 +486,7 @@ impl<B: DatabaseBackend> Database<B> {
     // ==================== Comments ====================
 
     pub fn add_comment(&self, issue_id: i64, content: &str) -> Result<i64> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "INSERT INTO comments (issue_id, content, created_at) VALUES (?1, ?2, ?3)",
             &[
@@ -593,7 +621,7 @@ impl<B: DatabaseBackend> Database<B> {
     // ==================== Sessions ====================
 
     pub fn start_session(&self) -> Result<i64> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "INSERT INTO sessions (started_at) VALUES (?1)",
             &[Value::Text(now)],
@@ -602,7 +630,7 @@ impl<B: DatabaseBackend> Database<B> {
     }
 
     pub fn end_session(&self, id: i64, notes: Option<&str>) -> Result<bool> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "UPDATE sessions SET ended_at = ?1, handoff_notes = ?2 WHERE id = ?3",
             &[
@@ -641,7 +669,7 @@ impl<B: DatabaseBackend> Database<B> {
     // ==================== Time Tracking ====================
 
     pub fn start_timer(&self, issue_id: i64) -> Result<i64> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "INSERT INTO time_entries (issue_id, started_at) VALUES (?1, ?2)",
             &[Value::Integer(issue_id), Value::Text(now)],
@@ -650,7 +678,7 @@ impl<B: DatabaseBackend> Database<B> {
     }
 
     pub fn stop_timer(&self, issue_id: i64) -> Result<bool> {
-        let now = Utc::now();
+        let now = current_timestamp();
         let now_str = now.to_rfc3339();
 
         // Get the active entry
@@ -736,7 +764,7 @@ impl<B: DatabaseBackend> Database<B> {
         } else {
             (issue_id_2, issue_id_1)
         };
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "INSERT OR IGNORE INTO relations (issue_id_1, issue_id_2, created_at) VALUES (?1, ?2, ?3)",
             &[Value::Integer(a), Value::Integer(b), Value::Text(now)],
@@ -758,7 +786,7 @@ impl<B: DatabaseBackend> Database<B> {
     }
 
     pub fn update_parent(&self, id: i64, parent_id: Option<i64>) -> Result<bool> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "UPDATE issues SET parent_id = ?1, updated_at = ?2 WHERE id = ?3",
             &[
@@ -790,7 +818,7 @@ impl<B: DatabaseBackend> Database<B> {
     // ==================== Milestones ====================
 
     pub fn create_milestone(&self, name: &str, description: Option<&str>) -> Result<i64> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "INSERT INTO milestones (name, description, status, created_at) VALUES (?1, ?2, 'open', ?3)",
             &[
@@ -856,7 +884,7 @@ impl<B: DatabaseBackend> Database<B> {
     }
 
     pub fn close_milestone(&self, id: i64) -> Result<bool> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "UPDATE milestones SET status = 'closed', closed_at = ?1 WHERE id = ?2",
             &[Value::Text(now), Value::Integer(id)],
@@ -888,7 +916,7 @@ impl<B: DatabaseBackend> Database<B> {
     // ==================== Archiving ====================
 
     pub fn archive_issue(&self, id: i64) -> Result<bool> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "UPDATE issues SET status = 'archived', updated_at = ?1 WHERE id = ?2 AND status = 'closed'",
             &[Value::Text(now), Value::Integer(id)],
@@ -897,7 +925,7 @@ impl<B: DatabaseBackend> Database<B> {
     }
 
     pub fn unarchive_issue(&self, id: i64) -> Result<bool> {
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
         let result = self.backend.execute(
             "UPDATE issues SET status = 'closed', updated_at = ?1 WHERE id = ?2 AND status = 'archived'",
             &[Value::Text(now), Value::Integer(id)],
@@ -914,9 +942,9 @@ impl<B: DatabaseBackend> Database<B> {
     }
 
     pub fn archive_older_than(&self, days: i64) -> Result<i32> {
-        let cutoff = Utc::now() - chrono::Duration::days(days);
+        let cutoff = current_timestamp() - chrono::Duration::days(days);
         let cutoff_str = cutoff.to_rfc3339();
-        let now = Utc::now().to_rfc3339();
+        let now = current_timestamp().to_rfc3339();
 
         let result = self.backend.execute(
             "UPDATE issues SET status = 'archived', updated_at = ?1 WHERE status = 'closed' AND closed_at < ?2",
@@ -932,7 +960,7 @@ impl<B: DatabaseBackend> Database<B> {
 fn parse_datetime(s: String) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(&s)
         .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now())
+        .unwrap_or_else(|_| current_timestamp())
 }
 
 fn issue_from_row(row: &Row) -> Issue {
@@ -943,8 +971,8 @@ fn issue_from_row(row: &Row) -> Issue {
         status: row.get_string(3).unwrap_or_else(|| "open".into()),
         priority: row.get_string(4).unwrap_or_else(|| "medium".into()),
         parent_id: row.get_optional_i64(5).ok().flatten(),
-        created_at: row.get_string(6).map(parse_datetime).unwrap_or_else(Utc::now),
-        updated_at: row.get_string(7).map(parse_datetime).unwrap_or_else(Utc::now),
+        created_at: row.get_string(6).map(parse_datetime).unwrap_or_else(default_timestamp),
+        updated_at: row.get_string(7).map(parse_datetime).unwrap_or_else(default_timestamp),
         closed_at: row.get_string(8).map(parse_datetime),
     }
 }
@@ -954,14 +982,14 @@ fn comment_from_row(row: &Row) -> Comment {
         id: row.get_i64(0).unwrap_or(0),
         issue_id: row.get_i64(1).unwrap_or(0),
         content: row.get_string(2).unwrap_or_default(),
-        created_at: row.get_string(3).map(parse_datetime).unwrap_or_else(Utc::now),
+        created_at: row.get_string(3).map(parse_datetime).unwrap_or_else(default_timestamp),
     }
 }
 
 fn session_from_row(row: &Row) -> Session {
     Session {
         id: row.get_i64(0).unwrap_or(0),
-        started_at: row.get_string(1).map(parse_datetime).unwrap_or_else(Utc::now),
+        started_at: row.get_string(1).map(parse_datetime).unwrap_or_else(default_timestamp),
         ended_at: row.get_string(2).map(parse_datetime),
         active_issue_id: row.get_optional_i64(3).ok().flatten(),
         handoff_notes: row.get_string(4),
@@ -974,7 +1002,7 @@ fn milestone_from_row(row: &Row) -> Milestone {
         name: row.get_string(1).unwrap_or_default(),
         description: row.get_string(2),
         status: row.get_string(3).unwrap_or_else(|| "open".into()),
-        created_at: row.get_string(4).map(parse_datetime).unwrap_or_else(Utc::now),
+        created_at: row.get_string(4).map(parse_datetime).unwrap_or_else(default_timestamp),
         closed_at: row.get_string(5).map(parse_datetime),
     }
 }

@@ -11,16 +11,17 @@ path = "src/lib.rs"
 [[bin]]
 name = "chainlink"
 path = "src/main.rs"
-required-features = ["std", "rusqlite-backend"]
+required-features = ["std", "rusqlite-backend", "cli"]
 
 [features]
-default = ["std", "rusqlite-backend"]
+default = ["std", "rusqlite-backend", "cli"]
 std = ["chrono/std", "chrono/now", "serde/std", "serde_json/std", "anyhow/std"]
 rusqlite-backend = ["rusqlite"]
+cli = ["clap"]
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive"], optional = true }
 chrono = { version = "0.4", default-features = false, features = ["serde", "alloc"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
