@@ -1,17 +1,24 @@
-use anyhow::Result;
+use crate::commands::CmdResult;
 
-use chainlink::backend::DatabaseBackend;
-use chainlink::db::Database;
+#[cfg(not(feature = "std"))]
+use alloc::format;
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
 
-pub fn run<B: DatabaseBackend>(db: &Database<B>, query: &str) -> Result<()> {
+use crate::backend::DatabaseBackend;
+use crate::db::Database;
+use crate::out_println;
+use crate::output::Output;
+
+pub fn run<B: DatabaseBackend>(db: &Database<B>, query: &str, out: &impl Output) -> CmdResult<()> {
     let results = db.search_issues(query)?;
 
     if results.is_empty() {
-        println!("No issues found matching '{}'", query);
+        out_println!(out, "No issues found matching '{}'", query);
         return Ok(());
     }
 
-    println!("Found {} issue(s) matching '{}':\n", results.len(), query);
+    out_println!(out, "Found {} issue(s) matching '{}':\n", results.len(), query);
 
     for issue in results {
         let status_marker = if issue.status == "closed" { "✓" } else { " " };
@@ -20,7 +27,8 @@ pub fn run<B: DatabaseBackend>(db: &Database<B>, query: &str) -> Result<()> {
             .map(|p| format!(" (sub of #{})", p))
             .unwrap_or_default();
 
-        println!(
+        out_println!(
+            out,
             "#{:<4} [{}] {:8} {}{} {}",
             issue.id,
             status_marker,
@@ -39,7 +47,7 @@ pub fn run<B: DatabaseBackend>(db: &Database<B>, query: &str) -> Result<()> {
             if desc.to_lowercase().contains(&query.to_lowercase()) {
                 let preview: String = desc.chars().take(60).collect();
                 let suffix = if desc.len() > 60 { "..." } else { "" };
-                println!("      └─ {}{}", preview.replace('\n', " "), suffix);
+                out_println!(out, "      └─ {}{}", preview.replace('\n', " "), suffix);
             }
         }
     }
@@ -50,7 +58,8 @@ pub fn run<B: DatabaseBackend>(db: &Database<B>, query: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chainlink::backend::RusqliteBackend;
+    use crate::backend::RusqliteBackend;
+    use crate::output::StdOutput;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
@@ -70,7 +79,7 @@ mod tests {
             .unwrap();
         db.create_issue("Add dark mode", None, "medium").unwrap();
 
-        let result = run(&db, "authentication");
+        let result = run(&db, "authentication", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -80,7 +89,7 @@ mod tests {
         db.create_issue("Feature A", Some("This relates to user login"), "medium")
             .unwrap();
 
-        let result = run(&db, "login");
+        let result = run(&db, "login", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -91,7 +100,7 @@ mod tests {
             .unwrap();
 
         // Search with different cases should still work (via db layer)
-        let result = run(&db, "authentication");
+        let result = run(&db, "authentication", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -100,7 +109,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         db.create_issue("Some issue", None, "medium").unwrap();
 
-        let result = run(&db, "nonexistent");
+        let result = run(&db, "nonexistent", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -108,7 +117,7 @@ mod tests {
     fn test_search_empty_database() {
         let (db, _dir) = setup_test_db();
 
-        let result = run(&db, "anything");
+        let result = run(&db, "anything", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -117,7 +126,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         db.create_issue("Test issue", None, "medium").unwrap();
 
-        let result = run(&db, "");
+        let result = run(&db, "", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -127,7 +136,7 @@ mod tests {
         db.create_issue("Fix bug with @mentions", None, "medium")
             .unwrap();
 
-        let result = run(&db, "@mentions");
+        let result = run(&db, "@mentions", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -137,7 +146,7 @@ mod tests {
         db.create_issue("Fix 日本語 support", None, "medium")
             .unwrap();
 
-        let result = run(&db, "日本語");
+        let result = run(&db, "日本語", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -147,7 +156,7 @@ mod tests {
         db.create_issue("Normal issue", None, "medium").unwrap();
 
         // Should not crash or inject SQL
-        let result = run(&db, "'; DROP TABLE issues; --");
+        let result = run(&db, "'; DROP TABLE issues; --", &StdOutput);
         assert!(result.is_ok());
 
         // Database should still be intact
@@ -162,7 +171,7 @@ mod tests {
             .unwrap();
 
         // SQL wildcards should be escaped
-        let result = run(&db, "%pattern%");
+        let result = run(&db, "%pattern%", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -173,7 +182,7 @@ mod tests {
         db.add_comment(id, "Found the root cause in authentication module")
             .unwrap();
 
-        let result = run(&db, "authentication");
+        let result = run(&db, "authentication", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -184,7 +193,7 @@ mod tests {
         db.create_subissue(parent_id, "Sub task authentication", None, "medium")
             .unwrap();
 
-        let result = run(&db, "authentication");
+        let result = run(&db, "authentication", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -196,7 +205,7 @@ mod tests {
             .unwrap();
         db.close_issue(id).unwrap();
 
-        let result = run(&db, "authentication");
+        let result = run(&db, "authentication", &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -207,7 +216,7 @@ mod tests {
         fn prop_search_never_panics(query in ".*") {
             let (db, _dir) = setup_test_db();
             db.create_issue("Test issue", None, "medium").unwrap();
-            let _ = run(&db, &query);
+            let _ = run(&db, &query, &StdOutput);
         }
 
         #[test]
@@ -217,7 +226,7 @@ mod tests {
         ) {
             let (db, _dir) = setup_test_db();
             db.create_issue(&title, None, "medium").unwrap();
-            let result = run(&db, &query);
+            let result = run(&db, &query, &StdOutput);
             prop_assert!(result.is_ok());
         }
 
@@ -228,7 +237,7 @@ mod tests {
         ) {
             let (db, _dir) = setup_test_db();
             db.create_issue(&title, None, "medium").unwrap();
-            let result = run(&db, &query);
+            let result = run(&db, &query, &StdOutput);
             prop_assert!(result.is_ok());
         }
     }

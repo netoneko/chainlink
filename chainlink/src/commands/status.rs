@@ -2,10 +2,13 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::Path;
 
-use chainlink::backend::DatabaseBackend;
-use chainlink::db::Database;
+use crate::backend::DatabaseBackend;
+use crate::db::Database;
+use crate::out_eprintln;
+use crate::out_println;
+use crate::output::Output;
 
-pub fn close<B: DatabaseBackend>(db: &Database<B>, id: i64, update_changelog: bool, chainlink_dir: &Path) -> Result<()> {
+pub fn close<B: DatabaseBackend>(db: &Database<B>, id: i64, update_changelog: bool, chainlink_dir: &Path, out: &impl Output) -> Result<()> {
     // Get issue details before closing
     let issue = db.get_issue(id)?;
     let issue = match issue {
@@ -15,7 +18,7 @@ pub fn close<B: DatabaseBackend>(db: &Database<B>, id: i64, update_changelog: bo
     let labels = db.get_labels(id)?;
 
     if db.close_issue(id)? {
-        println!("Closed issue #{}", id);
+        out_println!(out, "Closed issue #{}", id);
     } else {
         bail!("Issue #{} not found", id);
     }
@@ -28,9 +31,9 @@ pub fn close<B: DatabaseBackend>(db: &Database<B>, id: i64, update_changelog: bo
         // Create CHANGELOG.md if it doesn't exist
         if !changelog_path.exists() {
             if let Err(e) = create_changelog(&changelog_path) {
-                eprintln!("Warning: Could not create CHANGELOG.md: {}", e);
+                out_eprintln!(out, "Warning: Could not create CHANGELOG.md: {}", e);
             } else {
-                println!("Created CHANGELOG.md");
+                out_println!(out, "Created CHANGELOG.md");
             }
         }
 
@@ -39,9 +42,9 @@ pub fn close<B: DatabaseBackend>(db: &Database<B>, id: i64, update_changelog: bo
             let entry = format!("- {} (#{})\n", issue.title, id);
 
             if let Err(e) = append_to_changelog(&changelog_path, &category, &entry) {
-                eprintln!("Warning: Could not update CHANGELOG.md: {}", e);
+                out_eprintln!(out, "Warning: Could not update CHANGELOG.md: {}", e);
             } else {
-                println!("Added to CHANGELOG.md under {}", category);
+                out_println!(out, "Added to CHANGELOG.md under {}", category);
             }
         }
     }
@@ -126,9 +129,9 @@ fn append_to_changelog(path: &Path, category: &str, entry: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn reopen<B: DatabaseBackend>(db: &Database<B>, id: i64) -> Result<()> {
+pub fn reopen<B: DatabaseBackend>(db: &Database<B>, id: i64, out: &impl Output) -> Result<()> {
     if db.reopen_issue(id)? {
-        println!("Reopened issue #{}", id);
+        out_println!(out, "Reopened issue #{}", id);
     } else {
         bail!("Issue #{} not found", id);
     }
@@ -138,7 +141,8 @@ pub fn reopen<B: DatabaseBackend>(db: &Database<B>, id: i64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chainlink::backend::RusqliteBackend;
+    use crate::backend::RusqliteBackend;
+    use crate::output::StdOutput;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
@@ -159,7 +163,7 @@ mod tests {
 
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        let result = close(&db, issue_id, false, &chainlink_dir);
+        let result = close(&db, issue_id, false, &chainlink_dir, &StdOutput);
         assert!(result.is_ok());
 
         let issue = db.get_issue(issue_id).unwrap().unwrap();
@@ -173,7 +177,7 @@ mod tests {
         let chainlink_dir = _dir.path().join(".chainlink");
         std::fs::create_dir_all(&chainlink_dir).unwrap();
 
-        let result = close(&db, 99999, false, &chainlink_dir);
+        let result = close(&db, 99999, false, &chainlink_dir, &StdOutput);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
@@ -188,7 +192,7 @@ mod tests {
         db.close_issue(issue_id).unwrap();
 
         // Closing again should be fine (idempotent at db level)
-        let result = close(&db, issue_id, false, &chainlink_dir);
+        let result = close(&db, issue_id, false, &chainlink_dir, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -201,7 +205,7 @@ mod tests {
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
         db.close_issue(issue_id).unwrap();
 
-        let result = reopen(&db, issue_id);
+        let result = reopen(&db, issue_id, &StdOutput);
         assert!(result.is_ok());
 
         let issue = db.get_issue(issue_id).unwrap().unwrap();
@@ -213,7 +217,7 @@ mod tests {
     fn test_reopen_nonexistent_issue() {
         let (db, _dir) = setup_test_db();
 
-        let result = reopen(&db, 99999);
+        let result = reopen(&db, 99999, &StdOutput);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
@@ -225,7 +229,7 @@ mod tests {
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
         // Reopening an open issue - succeeds (idempotent operation)
-        let result = reopen(&db, issue_id);
+        let result = reopen(&db, issue_id, &StdOutput);
         assert!(result.is_ok());
 
         let issue = db.get_issue(issue_id).unwrap().unwrap();
@@ -322,17 +326,17 @@ mod tests {
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
         // Close
-        close(&db, issue_id, false, &chainlink_dir).unwrap();
+        close(&db, issue_id, false, &chainlink_dir, &StdOutput).unwrap();
         let issue = db.get_issue(issue_id).unwrap().unwrap();
         assert_eq!(issue.status, "closed");
 
         // Reopen
-        reopen(&db, issue_id).unwrap();
+        reopen(&db, issue_id, &StdOutput).unwrap();
         let issue = db.get_issue(issue_id).unwrap().unwrap();
         assert_eq!(issue.status, "open");
 
         // Close again
-        close(&db, issue_id, false, &chainlink_dir).unwrap();
+        close(&db, issue_id, false, &chainlink_dir, &StdOutput).unwrap();
         let issue = db.get_issue(issue_id).unwrap().unwrap();
         assert_eq!(issue.status, "closed");
     }
@@ -347,7 +351,7 @@ mod tests {
             std::fs::create_dir_all(&chainlink_dir).unwrap();
 
             let issue_id = db.create_issue(&title, None, "medium").unwrap();
-            close(&db, issue_id, false, &chainlink_dir).unwrap();
+            close(&db, issue_id, false, &chainlink_dir, &StdOutput).unwrap();
 
             let issue = db.get_issue(issue_id).unwrap().unwrap();
             prop_assert_eq!(issue.status, "closed");
@@ -360,7 +364,7 @@ mod tests {
             let issue_id = db.create_issue(&title, None, "medium").unwrap();
             db.close_issue(issue_id).unwrap();
 
-            reopen(&db, issue_id).unwrap();
+            reopen(&db, issue_id, &StdOutput).unwrap();
 
             let issue = db.get_issue(issue_id).unwrap().unwrap();
             prop_assert_eq!(issue.status, "open");
@@ -372,7 +376,7 @@ mod tests {
             let chainlink_dir = _dir.path().join(".chainlink");
             std::fs::create_dir_all(&chainlink_dir).unwrap();
 
-            let result = close(&db, issue_id, false, &chainlink_dir);
+            let result = close(&db, issue_id, false, &chainlink_dir, &StdOutput);
             prop_assert!(result.is_err());
         }
 
@@ -380,7 +384,7 @@ mod tests {
         fn prop_nonexistent_issue_reopen_fails(issue_id in 1000i64..10000) {
             let (db, _dir) = setup_test_db();
 
-            let result = reopen(&db, issue_id);
+            let result = reopen(&db, issue_id, &StdOutput);
             prop_assert!(result.is_err());
         }
 

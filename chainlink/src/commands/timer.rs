@@ -1,41 +1,56 @@
-use anyhow::{bail, Result};
+use crate::commands::CmdResult;
+use crate::db::DbError;
+#[cfg(feature = "std")]
 use chrono::Utc;
+#[cfg(not(feature = "std"))]
+use alloc::format;
+#[cfg(not(feature = "std"))]
+use alloc::string::ToString;
 
-use chainlink::backend::DatabaseBackend;
-use chainlink::db::Database;
+use crate::backend::DatabaseBackend;
+use crate::db::Database;
+use crate::out_println;
+use crate::output::Output;
 
-pub fn start<B: DatabaseBackend>(db: &Database<B>, issue_id: i64) -> Result<()> {
+pub fn start<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, out: &impl Output) -> CmdResult<()> {
     // Verify issue exists
     let issue = match db.get_issue(issue_id)? {
         Some(i) => i,
-        None => bail!("Issue #{} not found", issue_id),
+        None => return Err(DbError::Validation(format!("Issue #{} not found", issue_id)).into()),
     };
 
     // Check if there's already an active timer
     if let Some((active_id, _)) = db.get_active_timer()? {
         if active_id == issue_id {
-            bail!("Timer already running for issue #{}", issue_id);
+            return Err(DbError::Validation(format!("Timer already running for issue #{}", issue_id)).into());
         } else {
-            bail!(
+            return Err(DbError::Validation(format!(
                 "Timer already running for issue #{}. Stop it first with 'chainlink stop'.",
                 active_id
-            );
+            )).into());
         }
     }
 
     db.start_timer(issue_id)?;
-    println!("Started timer for #{}: {}", issue_id, issue.title);
-    println!("Run 'chainlink stop' when done.");
+    out_println!(out, "Started timer for #{}: {}", issue_id, issue.title);
+    out_println!(out, "Run 'chainlink stop' when done.");
 
     Ok(())
 }
 
-pub fn stop<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
+pub fn stop<B: DatabaseBackend>(db: &Database<B>, out: &impl Output) -> CmdResult<()> {
     let (issue_id, started_at) = match db.get_active_timer()? {
         Some(a) => a,
-        None => bail!("No timer running. Start one with 'chainlink start <id>'."),
+        None => return Err(DbError::Validation("No timer running. Start one with 'chainlink start <id>'.".into()).into()),
     };
+    #[cfg(feature = "std")]
     let duration = Utc::now().signed_duration_since(started_at);
+    #[cfg(not(feature = "std"))]
+    let duration = {
+        // In no_std mode, we can't calculate duration accurately
+        // Use a zero duration as fallback
+        chrono::Duration::seconds(0)
+    };
 
     db.stop_timer(issue_id)?;
 
@@ -48,27 +63,36 @@ pub fn stop<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
     let minutes = duration.num_minutes() % 60;
     let seconds = duration.num_seconds() % 60;
 
-    println!("Stopped timer for #{}: {}", issue_id, title);
-    println!("Time spent: {}h {}m {}s", hours, minutes, seconds);
+    out_println!(out, "Stopped timer for #{}: {}", issue_id, title);
+    out_println!(out, "Time spent: {}h {}m {}s", hours, minutes, seconds);
 
     // Show total time for this issue
     let total = db.get_total_time(issue_id)?;
     let total_hours = total / 3600;
     let total_minutes = (total % 3600) / 60;
-    println!(
+    out_println!(
+        out,
         "Total time on this issue: {}h {}m",
-        total_hours, total_minutes
+        total_hours,
+        total_minutes
     );
 
     Ok(())
 }
 
-pub fn status<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
+pub fn status<B: DatabaseBackend>(db: &Database<B>, out: &impl Output) -> CmdResult<()> {
     let active = db.get_active_timer()?;
 
     match active {
         Some((issue_id, started_at)) => {
+            #[cfg(feature = "std")]
             let duration = Utc::now().signed_duration_since(started_at);
+            #[cfg(not(feature = "std"))]
+            let duration = {
+                // In no_std mode, we can't calculate duration accurately
+                // Use a zero duration as fallback
+                chrono::Duration::seconds(0)
+            };
             let hours = duration.num_hours();
             let minutes = duration.num_minutes() % 60;
             let seconds = duration.num_seconds() % 60;
@@ -78,11 +102,11 @@ pub fn status<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
                 .map(|i| i.title)
                 .unwrap_or_else(|| "(deleted)".to_string());
 
-            println!("Timer running: #{} {}", issue_id, title);
-            println!("Elapsed: {}h {}m {}s", hours, minutes, seconds);
+            out_println!(out, "Timer running: #{} {}", issue_id, title);
+            out_println!(out, "Elapsed: {}h {}m {}s", hours, minutes, seconds);
         }
         None => {
-            println!("No timer running.");
+            out_println!(out, "No timer running.");
         }
     }
 
@@ -92,7 +116,8 @@ pub fn status<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chainlink::backend::RusqliteBackend;
+    use crate::backend::RusqliteBackend;
+    use crate::output::StdOutput;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
@@ -108,7 +133,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        let result = start(&db, id);
+        let result = start(&db, id, &StdOutput);
         assert!(result.is_ok());
 
         let active = db.get_active_timer().unwrap();
@@ -120,7 +145,7 @@ mod tests {
     fn test_start_nonexistent_issue() {
         let (db, _dir) = setup_test_db();
 
-        let result = start(&db, 99999);
+        let result = start(&db, 99999, &StdOutput);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
@@ -130,8 +155,8 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        start(&db, id).unwrap();
-        let result = start(&db, id);
+        start(&db, id, &StdOutput).unwrap();
+        let result = start(&db, id, &StdOutput);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("already running"));
     }
@@ -142,8 +167,8 @@ mod tests {
         let id1 = db.create_issue("Issue 1", None, "medium").unwrap();
         let id2 = db.create_issue("Issue 2", None, "medium").unwrap();
 
-        start(&db, id1).unwrap();
-        let result = start(&db, id2);
+        start(&db, id1, &StdOutput).unwrap();
+        let result = start(&db, id2, &StdOutput);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Stop it first"));
     }
@@ -153,8 +178,8 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        start(&db, id).unwrap();
-        let result = stop(&db);
+        start(&db, id, &StdOutput).unwrap();
+        let result = stop(&db, &StdOutput);
         assert!(result.is_ok());
 
         let active = db.get_active_timer().unwrap();
@@ -165,7 +190,7 @@ mod tests {
     fn test_stop_no_timer() {
         let (db, _dir) = setup_test_db();
 
-        let result = stop(&db);
+        let result = stop(&db, &StdOutput);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("No timer running"));
     }
@@ -174,7 +199,7 @@ mod tests {
     fn test_status_no_timer() {
         let (db, _dir) = setup_test_db();
 
-        let result = status(&db);
+        let result = status(&db, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -183,8 +208,8 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        start(&db, id).unwrap();
-        let result = status(&db);
+        start(&db, id, &StdOutput).unwrap();
+        let result = status(&db, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -193,9 +218,9 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        start(&db, id).unwrap();
-        status(&db).unwrap();
-        stop(&db).unwrap();
+        start(&db, id, &StdOutput).unwrap();
+        status(&db, &StdOutput).unwrap();
+        stop(&db, &StdOutput).unwrap();
 
         let active = db.get_active_timer().unwrap();
         assert!(active.is_none());
@@ -208,10 +233,10 @@ mod tests {
             let ids: Vec<i64> = (0..5).map(|i| db.create_issue(&format!("Issue {}", i), None, "medium").unwrap()).collect();
             let id = ids[idx];
 
-            start(&db, id).unwrap();
+            start(&db, id, &StdOutput).unwrap();
             prop_assert!(db.get_active_timer().unwrap().is_some());
 
-            stop(&db).unwrap();
+            stop(&db, &StdOutput).unwrap();
             prop_assert!(db.get_active_timer().unwrap().is_none());
         }
     }

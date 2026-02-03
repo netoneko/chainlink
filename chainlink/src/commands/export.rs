@@ -3,9 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Write};
 
-use chainlink::backend::DatabaseBackend;
-use chainlink::db::Database;
-use chainlink::models::Issue;
+use crate::backend::DatabaseBackend;
+use crate::db::Database;
+use crate::models::Issue;
+use crate::out_eprintln;
+use crate::output::Output;
 
 #[derive(Serialize, Deserialize)]
 pub struct ExportedIssue {
@@ -60,7 +62,11 @@ fn export_issue<B: DatabaseBackend>(db: &Database<B>, issue: &Issue) -> Result<E
     })
 }
 
-pub fn run_json<B: DatabaseBackend>(db: &Database<B>, output_path: Option<&str>) -> Result<()> {
+pub fn run_json<B: DatabaseBackend>(
+    db: &Database<B>,
+    output_path: Option<&str>,
+    out: &impl Output,
+) -> Result<()> {
     let issues = db.list_issues(Some("all"), None, None)?;
 
     let exported: Vec<ExportedIssue> = issues
@@ -79,7 +85,7 @@ pub fn run_json<B: DatabaseBackend>(db: &Database<B>, output_path: Option<&str>)
     match output_path {
         Some(path) => {
             fs::write(path, json).context("Failed to write export file")?;
-            eprintln!("Exported {} issues to {}", data.issues.len(), path);
+            out_eprintln!(out, "Exported {} issues to {}", data.issues.len(), path);
         }
         None => {
             let mut stdout = io::stdout().lock();
@@ -89,7 +95,11 @@ pub fn run_json<B: DatabaseBackend>(db: &Database<B>, output_path: Option<&str>)
     Ok(())
 }
 
-pub fn run_markdown<B: DatabaseBackend>(db: &Database<B>, output_path: Option<&str>) -> Result<()> {
+pub fn run_markdown<B: DatabaseBackend>(
+    db: &Database<B>,
+    output_path: Option<&str>,
+    out: &impl Output,
+) -> Result<()> {
     let issues = db.list_issues(Some("all"), None, None)?;
     let mut md = String::new();
 
@@ -120,7 +130,7 @@ pub fn run_markdown<B: DatabaseBackend>(db: &Database<B>, output_path: Option<&s
     match output_path {
         Some(path) => {
             fs::write(path, md).context("Failed to write export file")?;
-            eprintln!("Exported {} issues to {}", issues.len(), path);
+            out_eprintln!(out, "Exported {} issues to {}", issues.len(), path);
         }
         None => {
             let mut stdout = io::stdout().lock();
@@ -183,7 +193,8 @@ fn write_issue_md<B: DatabaseBackend>(md: &mut String, db: &Database<B>, issue: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chainlink::backend::RusqliteBackend;
+    use crate::backend::RusqliteBackend;
+    use crate::output::StdOutput;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
@@ -246,7 +257,7 @@ mod tests {
         db.create_issue("Issue 2", Some("Description"), "low")
             .unwrap();
         let output_path = dir.path().join("export.json");
-        let result = run_json(&db, Some(output_path.to_str().unwrap()));
+        let result = run_json(&db, Some(output_path.to_str().unwrap()), &StdOutput);
         assert!(result.is_ok());
         let content = fs::read_to_string(&output_path).unwrap();
         let data: ExportData = serde_json::from_str(&content).unwrap();
@@ -258,7 +269,7 @@ mod tests {
     fn test_run_json_empty_database() {
         let (db, dir) = setup_test_db();
         let output_path = dir.path().join("export.json");
-        let result = run_json(&db, Some(output_path.to_str().unwrap()));
+        let result = run_json(&db, Some(output_path.to_str().unwrap()), &StdOutput);
         assert!(result.is_ok());
         let content = fs::read_to_string(&output_path).unwrap();
         let data: ExportData = serde_json::from_str(&content).unwrap();
@@ -270,7 +281,7 @@ mod tests {
         let (db, dir) = setup_test_db();
         db.create_issue("Issue 1", None, "high").unwrap();
         let output_path = dir.path().join("export.md");
-        let result = run_markdown(&db, Some(output_path.to_str().unwrap()));
+        let result = run_markdown(&db, Some(output_path.to_str().unwrap()), &StdOutput);
         assert!(result.is_ok());
         let content = fs::read_to_string(&output_path).unwrap();
         assert!(content.contains("# Chainlink Issues Export"));
@@ -283,7 +294,7 @@ mod tests {
         let closed_id = db.create_issue("Closed issue", None, "medium").unwrap();
         db.close_issue(closed_id).unwrap();
         let output_path = dir.path().join("export.md");
-        run_markdown(&db, Some(output_path.to_str().unwrap())).unwrap();
+        run_markdown(&db, Some(output_path.to_str().unwrap()), &StdOutput).unwrap();
         let content = fs::read_to_string(&output_path).unwrap();
         assert!(content.contains("## Open Issues"));
         assert!(content.contains("## Closed Issues"));
@@ -297,7 +308,7 @@ mod tests {
             .unwrap();
         db.add_label(id, "バグ").unwrap();
         let output_path = dir.path().join("export.json");
-        run_json(&db, Some(output_path.to_str().unwrap())).unwrap();
+        run_json(&db, Some(output_path.to_str().unwrap()), &StdOutput).unwrap();
         let content = fs::read_to_string(&output_path).unwrap();
         let data: ExportData = serde_json::from_str(&content).unwrap();
         assert_eq!(data.issues[0].title, "Test 🐛");
@@ -337,7 +348,7 @@ mod tests {
             let (db, dir) = setup_test_db();
             db.create_issue(&title, None, "medium").unwrap();
             let output_path = dir.path().join("export.json");
-            let result = run_json(&db, Some(output_path.to_str().unwrap()));
+            let result = run_json(&db, Some(output_path.to_str().unwrap()), &StdOutput);
             prop_assert!(result.is_ok());
         }
 
@@ -346,7 +357,7 @@ mod tests {
             let (db, dir) = setup_test_db();
             db.create_issue(&title, None, "medium").unwrap();
             let output_path = dir.path().join("export.json");
-            run_json(&db, Some(output_path.to_str().unwrap())).unwrap();
+            run_json(&db, Some(output_path.to_str().unwrap()), &StdOutput).unwrap();
             let content = fs::read_to_string(&output_path).unwrap();
             let result: Result<ExportData, _> = serde_json::from_str(&content);
             prop_assert!(result.is_ok());

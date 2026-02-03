@@ -2,8 +2,10 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-use chainlink::backend::RusqliteBackend;
-use chainlink::db::Database;
+use crate::backend::RusqliteBackend;
+use crate::db::Database;
+use crate::out_println;
+use crate::output::Output;
 
 // Embed hook files at compile time
 // Path: chainlink/src/commands/init.rs -> ../../../.claude/
@@ -74,7 +76,7 @@ const RULE_FILES: &[(&str, &str)] = &[
     ("sanitize-patterns.txt", SANITIZE_PATTERNS),
 ];
 
-pub fn run(path: &Path, force: bool) -> Result<()> {
+pub fn run(path: &Path, force: bool, out: &impl Output) -> Result<()> {
     let chainlink_dir = path.join(".chainlink");
     let claude_dir = path.join(".claude");
     let hooks_dir = claude_dir.join("hooks");
@@ -84,8 +86,8 @@ pub fn run(path: &Path, force: bool) -> Result<()> {
     let claude_exists = claude_dir.exists();
 
     if chainlink_exists && claude_exists && !force {
-        println!("Already initialized at {}", path.display());
-        println!("Use --force to update hooks to latest version.");
+        out_println!(out, "Already initialized at {}", path.display());
+        out_println!(out, "Use --force to update hooks to latest version.");
         return Ok(());
     }
 
@@ -97,7 +99,7 @@ pub fn run(path: &Path, force: bool) -> Result<()> {
 
         let db_path = chainlink_dir.join("issues.db");
         Database::<RusqliteBackend>::open(db_path.to_str().unwrap_or(""))?;
-        println!("Created {}", chainlink_dir.display());
+        out_println!(out, "Created {}", chainlink_dir.display());
     }
 
     // Create or update rules directory
@@ -111,9 +113,9 @@ pub fn run(path: &Path, force: bool) -> Result<()> {
         }
 
         if force && rules_exist {
-            println!("Updated {} with latest rules", rules_dir.display());
+            out_println!(out, "Updated {} with latest rules", rules_dir.display());
         } else {
-            println!("Created {} with default rules", rules_dir.display());
+            out_println!(out, "Created {} with default rules", rules_dir.display());
         }
     }
 
@@ -148,16 +150,16 @@ pub fn run(path: &Path, force: bool) -> Result<()> {
         fs::write(path.join(".mcp.json"), MCP_JSON).context("Failed to write .mcp.json")?;
 
         if force && claude_exists {
-            println!("Updated {} with latest hooks", claude_dir.display());
+            out_println!(out, "Updated {} with latest hooks", claude_dir.display());
         } else {
-            println!("Created {} with Claude Code hooks", claude_dir.display());
+            out_println!(out, "Created {} with Claude Code hooks", claude_dir.display());
         }
     }
 
-    println!("Chainlink initialized successfully!");
-    println!("\nNext steps:");
-    println!("  chainlink session start     # Start a session");
-    println!("  chainlink create \"Task\"     # Create an issue");
+    out_println!(out, "Chainlink initialized successfully!");
+    out_println!(out, "\nNext steps:");
+    out_println!(out, "  chainlink session start     # Start a session");
+    out_println!(out, "  chainlink create \"Task\"     # Create an issue");
 
     Ok(())
 }
@@ -165,13 +167,14 @@ pub fn run(path: &Path, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chainlink::backend::RusqliteBackend;
+    use crate::backend::RusqliteBackend;
+    use crate::output::StdOutput;
     use tempfile::tempdir;
 
     #[test]
     fn test_run_fresh_init() {
         let dir = tempdir().unwrap();
-        let result = run(dir.path(), false);
+        let result = run(dir.path(), false, &StdOutput);
         assert!(result.is_ok());
 
         // Verify directories created
@@ -186,7 +189,7 @@ mod tests {
     #[test]
     fn test_run_creates_hook_files() {
         let dir = tempdir().unwrap();
-        run(dir.path(), false).unwrap();
+        run(dir.path(), false, &StdOutput).unwrap();
 
         // Verify hook files
         assert!(dir.path().join(".claude/settings.json").exists());
@@ -201,7 +204,7 @@ mod tests {
     #[test]
     fn test_run_creates_rule_files() {
         let dir = tempdir().unwrap();
-        run(dir.path(), false).unwrap();
+        run(dir.path(), false, &StdOutput).unwrap();
 
         let rules_dir = dir.path().join(".chainlink/rules");
         assert!(rules_dir.join("global.md").exists());
@@ -217,10 +220,10 @@ mod tests {
         let dir = tempdir().unwrap();
 
         // First init
-        run(dir.path(), false).unwrap();
+        run(dir.path(), false, &StdOutput).unwrap();
 
         // Second init without force - should succeed but not recreate
-        let result = run(dir.path(), false);
+        let result = run(dir.path(), false, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -229,14 +232,14 @@ mod tests {
         let dir = tempdir().unwrap();
 
         // First init
-        run(dir.path(), false).unwrap();
+        run(dir.path(), false, &StdOutput).unwrap();
 
         // Modify a hook file
         let hook_path = dir.path().join(".claude/hooks/prompt-guard.py");
         fs::write(&hook_path, "# modified").unwrap();
 
         // Force update
-        run(dir.path(), true).unwrap();
+        run(dir.path(), true, &StdOutput).unwrap();
 
         // Verify file was restored
         let content = fs::read_to_string(&hook_path).unwrap();
@@ -251,7 +254,7 @@ mod tests {
         // Create only .chainlink directory
         fs::create_dir_all(dir.path().join(".chainlink")).unwrap();
 
-        let result = run(dir.path(), false);
+        let result = run(dir.path(), false, &StdOutput);
         assert!(result.is_ok());
 
         // .claude should now exist
@@ -265,7 +268,7 @@ mod tests {
         // Create only .claude directory
         fs::create_dir_all(dir.path().join(".claude")).unwrap();
 
-        let result = run(dir.path(), false);
+        let result = run(dir.path(), false, &StdOutput);
         assert!(result.is_ok());
 
         // .chainlink should now exist
@@ -275,7 +278,7 @@ mod tests {
     #[test]
     fn test_run_database_usable() {
         let dir = tempdir().unwrap();
-        run(dir.path(), false).unwrap();
+        run(dir.path(), false, &StdOutput).unwrap();
 
         // Open the created database and verify it works
         let db_path = dir.path().join(".chainlink/issues.db");
@@ -289,7 +292,7 @@ mod tests {
     #[test]
     fn test_run_rule_files_not_empty() {
         let dir = tempdir().unwrap();
-        run(dir.path(), false).unwrap();
+        run(dir.path(), false, &StdOutput).unwrap();
 
         let rules_dir = dir.path().join(".chainlink/rules");
 
@@ -304,14 +307,14 @@ mod tests {
     #[test]
     fn test_run_force_updates_rules() {
         let dir = tempdir().unwrap();
-        run(dir.path(), false).unwrap();
+        run(dir.path(), false, &StdOutput).unwrap();
 
         // Modify a rule file
         let rule_path = dir.path().join(".chainlink/rules/global.md");
         fs::write(&rule_path, "# modified rule").unwrap();
 
         // Force update
-        run(dir.path(), true).unwrap();
+        run(dir.path(), true, &StdOutput).unwrap();
 
         // Verify file was restored
         let content = fs::read_to_string(&rule_path).unwrap();
@@ -324,7 +327,7 @@ mod tests {
 
         // Multiple force runs should all succeed
         for _ in 0..3 {
-            let result = run(dir.path(), true);
+            let result = run(dir.path(), true, &StdOutput);
             assert!(result.is_ok());
         }
 

@@ -2,14 +2,17 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-pub fn run(chainlink_dir: &Path) -> Result<()> {
+use crate::out_println;
+use crate::output::Output;
+
+pub fn run(chainlink_dir: &Path, out: &impl Output) -> Result<()> {
     let marker_file = chainlink_dir.join("last_test_run");
 
     // Create or update the marker file
     fs::write(&marker_file, "").context("Failed to update test marker")?;
 
-    println!("✓ Marked tests as run");
-    println!("  Test reminder will reset on next code change.");
+    out_println!(out, "✓ Marked tests as run");
+    out_println!(out, "  Test reminder will reset on next code change.");
 
     Ok(())
 }
@@ -17,6 +20,7 @@ pub fn run(chainlink_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::output::StdOutput;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
@@ -26,7 +30,7 @@ mod tests {
         let chainlink_dir = dir.path().join(".chainlink");
         std::fs::create_dir_all(&chainlink_dir).unwrap();
 
-        let result = run(&chainlink_dir);
+        let result = run(&chainlink_dir, &StdOutput);
         assert!(result.is_ok());
 
         let marker_path = chainlink_dir.join("last_test_run");
@@ -42,7 +46,7 @@ mod tests {
         let marker_path = chainlink_dir.join("last_test_run");
         std::fs::write(&marker_path, "old content").unwrap();
 
-        let result = run(&chainlink_dir);
+        let result = run(&chainlink_dir, &StdOutput);
         assert!(result.is_ok());
 
         let content = std::fs::read_to_string(&marker_path).unwrap();
@@ -54,7 +58,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let nonexistent = dir.path().join("nonexistent");
 
-        let result = run(&nonexistent);
+        let result = run(&nonexistent, &StdOutput);
         assert!(result.is_err());
     }
 
@@ -73,7 +77,7 @@ mod tests {
             perms.set_mode(0o444);
             std::fs::set_permissions(&chainlink_dir, perms).unwrap();
 
-            let result = run(&chainlink_dir);
+            let result = run(&chainlink_dir, &StdOutput);
             assert!(result.is_err());
 
             // Restore permissions for cleanup
@@ -91,7 +95,7 @@ mod tests {
 
         // Run multiple times
         for _ in 0..3 {
-            let result = run(&chainlink_dir);
+            let result = run(&chainlink_dir, &StdOutput);
             assert!(result.is_ok());
         }
 
@@ -106,7 +110,7 @@ mod tests {
             let chainlink_dir = dir.path().join(&subdir);
             std::fs::create_dir_all(&chainlink_dir).unwrap();
 
-            let result = run(&chainlink_dir);
+            let result = run(&chainlink_dir, &StdOutput);
             prop_assert!(result.is_ok());
         }
     }

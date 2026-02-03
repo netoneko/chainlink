@@ -1,16 +1,25 @@
-use anyhow::Result;
+use crate::commands::CmdResult;
+use crate::db::DbError;
 
-use chainlink::backend::DatabaseBackend;
-use chainlink::db::Database;
+#[cfg(not(feature = "std"))]
+use alloc::format;
+#[cfg(not(feature = "std"))]
+use alloc::string::ToString;
 
-pub fn add<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, related_id: i64) -> Result<()> {
+use crate::backend::DatabaseBackend;
+use crate::db::Database;
+use crate::out_println;
+use crate::output::Output;
+
+pub fn add<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, related_id: i64, out: &impl Output) -> CmdResult<()> {
     db.require_issue(issue_id)?;
     db.require_issue(related_id)?;
 
     if db.add_relation(issue_id, related_id)? {
-        println!("Linked #{} ↔ #{}", issue_id, related_id);
+        out_println!(out, "Linked #{} ↔ #{}", issue_id, related_id);
     } else {
-        println!(
+        out_println!(
+            out,
             "Issues #{} and #{} are already related",
             issue_id, related_id
         );
@@ -19,11 +28,12 @@ pub fn add<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, related_id: i64)
     Ok(())
 }
 
-pub fn remove<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, related_id: i64) -> Result<()> {
+pub fn remove<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, related_id: i64, out: &impl Output) -> CmdResult<()> {
     if db.remove_relation(issue_id, related_id)? {
-        println!("Unlinked #{} ↔ #{}", issue_id, related_id);
+        out_println!(out, "Unlinked #{} ↔ #{}", issue_id, related_id);
     } else {
-        println!(
+        out_println!(
+            out,
             "No relation found between #{} and #{}",
             issue_id, related_id
         );
@@ -32,20 +42,21 @@ pub fn remove<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, related_id: i
     Ok(())
 }
 
-pub fn list<B: DatabaseBackend>(db: &Database<B>, issue_id: i64) -> Result<()> {
+pub fn list<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, out: &impl Output) -> CmdResult<()> {
     db.require_issue(issue_id)?;
 
     let related = db.get_related_issues(issue_id)?;
 
     if related.is_empty() {
-        println!("No related issues for #{}", issue_id);
+        out_println!(out, "No related issues for #{}", issue_id);
         return Ok(());
     }
 
-    println!("Related to #{}:", issue_id);
+    out_println!(out, "Related to #{}:", issue_id);
     for r in related {
         let status_marker = if r.status == "closed" { "✓" } else { " " };
-        println!(
+        out_println!(
+            out,
             "  #{:<4} [{}] {:8} {}",
             r.id, status_marker, r.priority, r.title
         );
@@ -57,7 +68,8 @@ pub fn list<B: DatabaseBackend>(db: &Database<B>, issue_id: i64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chainlink::backend::RusqliteBackend;
+    use crate::backend::RusqliteBackend;
+    use crate::output::StdOutput;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
@@ -74,7 +86,7 @@ mod tests {
         let id1 = db.create_issue("Issue 1", None, "medium").unwrap();
         let id2 = db.create_issue("Issue 2", None, "medium").unwrap();
 
-        let result = add(&db, id1, id2);
+        let result = add(&db, id1, id2, &StdOutput);
         assert!(result.is_ok());
 
         let related = db.get_related_issues(id1).unwrap();
@@ -88,7 +100,7 @@ mod tests {
         let id1 = db.create_issue("Issue 1", None, "medium").unwrap();
         let id2 = db.create_issue("Issue 2", None, "medium").unwrap();
 
-        add(&db, id1, id2).unwrap();
+        add(&db, id1, id2, &StdOutput).unwrap();
 
         let related1 = db.get_related_issues(id1).unwrap();
         let related2 = db.get_related_issues(id2).unwrap();
@@ -101,7 +113,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let id = db.create_issue("Issue 1", None, "medium").unwrap();
 
-        let result = add(&db, id, 99999);
+        let result = add(&db, id, 99999, &StdOutput);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
@@ -112,8 +124,8 @@ mod tests {
         let id1 = db.create_issue("Issue 1", None, "medium").unwrap();
         let id2 = db.create_issue("Issue 2", None, "medium").unwrap();
 
-        add(&db, id1, id2).unwrap();
-        let result = add(&db, id1, id2);
+        add(&db, id1, id2, &StdOutput).unwrap();
+        let result = add(&db, id1, id2, &StdOutput);
         assert!(result.is_ok());
 
         let related = db.get_related_issues(id1).unwrap();
@@ -126,8 +138,8 @@ mod tests {
         let id1 = db.create_issue("Issue 1", None, "medium").unwrap();
         let id2 = db.create_issue("Issue 2", None, "medium").unwrap();
 
-        add(&db, id1, id2).unwrap();
-        let result = remove(&db, id1, id2);
+        add(&db, id1, id2, &StdOutput).unwrap();
+        let result = remove(&db, id1, id2, &StdOutput);
         assert!(result.is_ok());
 
         let related = db.get_related_issues(id1).unwrap();
@@ -140,7 +152,7 @@ mod tests {
         let id1 = db.create_issue("Issue 1", None, "medium").unwrap();
         let id2 = db.create_issue("Issue 2", None, "medium").unwrap();
 
-        let result = remove(&db, id1, id2);
+        let result = remove(&db, id1, id2, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -151,10 +163,10 @@ mod tests {
         let id2 = db.create_issue("Issue 2", None, "medium").unwrap();
         let id3 = db.create_issue("Issue 3", None, "medium").unwrap();
 
-        add(&db, id1, id2).unwrap();
-        add(&db, id1, id3).unwrap();
+        add(&db, id1, id2, &StdOutput).unwrap();
+        add(&db, id1, id3, &StdOutput).unwrap();
 
-        let result = list(&db, id1);
+        let result = list(&db, id1, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -162,7 +174,7 @@ mod tests {
     fn test_list_relations_nonexistent() {
         let (db, _dir) = setup_test_db();
 
-        let result = list(&db, 99999);
+        let result = list(&db, 99999, &StdOutput);
         assert!(result.is_err());
     }
 
@@ -171,7 +183,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let id = db.create_issue("Lonely issue", None, "medium").unwrap();
 
-        let result = list(&db, id);
+        let result = list(&db, id, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -185,11 +197,11 @@ mod tests {
                 let id1 = ids[a as usize % ids.len()];
                 let id2 = ids[b as usize % ids.len()];
 
-                add(&db, id1, id2).unwrap();
+                add(&db, id1, id2, &StdOutput).unwrap();
                 let related = db.get_related_issues(id1).unwrap();
                 prop_assert!(!related.is_empty());
 
-                remove(&db, id1, id2).unwrap();
+                remove(&db, id1, id2, &StdOutput).unwrap();
                 let related = db.get_related_issues(id1).unwrap();
                 prop_assert!(related.is_empty());
             }

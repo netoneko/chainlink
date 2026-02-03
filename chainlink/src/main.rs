@@ -1,4 +1,3 @@
-mod commands;
 mod daemon;
 
 use anyhow::{bail, Context, Result};
@@ -7,7 +6,9 @@ use std::env;
 use std::path::PathBuf;
 
 use chainlink::backend::RusqliteBackend;
+use chainlink::commands;
 use chainlink::db::Database;
+use chainlink::output::StdOutput;
 
 #[derive(Parser)]
 #[command(name = "chainlink")]
@@ -384,10 +385,12 @@ fn get_db() -> Result<Database<RusqliteBackend>> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    let out = StdOutput;
+    
     match cli.command {
         Commands::Init { force } => {
             let cwd = env::current_dir()?;
-            commands::init::run(&cwd, force)
+            commands::init::run(&cwd, force, &out)
         }
 
         Commands::Create {
@@ -403,6 +406,7 @@ fn main() -> Result<()> {
                 description.as_deref(),
                 &priority,
                 template.as_deref(),
+                &out,
             )
         }
 
@@ -413,7 +417,7 @@ fn main() -> Result<()> {
             priority,
         } => {
             let db = get_db()?;
-            commands::create::run_subissue(&db, parent, &title, description.as_deref(), &priority)
+            commands::create::run_subissue(&db, parent, &title, description.as_deref(), &priority, &out)
         }
 
         Commands::List {
@@ -422,17 +426,17 @@ fn main() -> Result<()> {
             priority,
         } => {
             let db = get_db()?;
-            commands::list::run(&db, Some(&status), label.as_deref(), priority.as_deref())
+            commands::list::run(&db, Some(&status), label.as_deref(), priority.as_deref(), &out)
         }
 
         Commands::Search { query } => {
             let db = get_db()?;
-            commands::search::run(&db, &query)
+            commands::search::run(&db, &query, &out)
         }
 
         Commands::Show { id } => {
             let db = get_db()?;
-            commands::show::run(&db, id)
+            commands::show::run(&db, id, &out)
         }
 
         Commands::Update {
@@ -448,110 +452,111 @@ fn main() -> Result<()> {
                 title.as_deref(),
                 description.as_deref(),
                 priority.as_deref(),
+                &out,
             )
         }
 
         Commands::Close { id, no_changelog } => {
             let db = get_db()?;
             let chainlink_dir = find_chainlink_dir()?;
-            commands::status::close(&db, id, !no_changelog, &chainlink_dir)
+            commands::status::close(&db, id, !no_changelog, &chainlink_dir, &out)
         }
 
         Commands::Reopen { id } => {
             let db = get_db()?;
-            commands::status::reopen(&db, id)
+            commands::status::reopen(&db, id, &out)
         }
 
         Commands::Delete { id, force } => {
             let db = get_db()?;
-            commands::delete::run(&db, id, force)
+            commands::delete::run(&db, id, force, &out)
         }
 
         Commands::Comment { id, text } => {
             let db = get_db()?;
-            commands::comment::run(&db, id, &text)
+            commands::comment::run(&db, id, &text, &out)
         }
 
         Commands::Label { id, label } => {
             let db = get_db()?;
-            commands::label::add(&db, id, &label)
+            commands::label::add(&db, id, &label, &out)
         }
 
         Commands::Unlabel { id, label } => {
             let db = get_db()?;
-            commands::label::remove(&db, id, &label)
+            commands::label::remove(&db, id, &label, &out)
         }
 
         Commands::Block { id, blocker } => {
             let db = get_db()?;
-            commands::deps::block(&db, id, blocker)
+            commands::deps::block(&db, id, blocker, &out)
         }
 
         Commands::Unblock { id, blocker } => {
             let db = get_db()?;
-            commands::deps::unblock(&db, id, blocker)
+            commands::deps::unblock(&db, id, blocker, &out)
         }
 
         Commands::Blocked => {
             let db = get_db()?;
-            commands::deps::list_blocked(&db)
+            commands::deps::list_blocked(&db, &out)
         }
 
         Commands::Ready => {
             let db = get_db()?;
-            commands::deps::list_ready(&db)
+            commands::deps::list_ready(&db, &out)
         }
 
         Commands::Relate { id, related } => {
             let db = get_db()?;
-            commands::relate::add(&db, id, related)
+            commands::relate::add(&db, id, related, &out)
         }
 
         Commands::Unrelate { id, related } => {
             let db = get_db()?;
-            commands::relate::remove(&db, id, related)
+            commands::relate::remove(&db, id, related, &out)
         }
 
         Commands::Related { id } => {
             let db = get_db()?;
-            commands::relate::list(&db, id)
+            commands::relate::list(&db, id, &out)
         }
 
         Commands::Next => {
             let db = get_db()?;
-            commands::next::run(&db)
+            commands::next::run(&db, &out)
         }
 
         Commands::Tree { status } => {
             let db = get_db()?;
-            commands::tree::run(&db, Some(&status))
+            commands::tree::run(&db, Some(&status), &out)
         }
 
         Commands::Start { id } => {
             let db = get_db()?;
-            commands::timer::start(&db, id)
+            commands::timer::start(&db, id, &out)
         }
 
         Commands::Stop => {
             let db = get_db()?;
-            commands::timer::stop(&db)
+            commands::timer::stop(&db, &out)
         }
 
         Commands::Timer => {
             let db = get_db()?;
-            commands::timer::status(&db)
+            commands::timer::status(&db, &out)
         }
 
         Commands::Tested => {
             let chainlink_dir = find_chainlink_dir()?;
-            commands::tested::run(&chainlink_dir)
+            commands::tested::run(&chainlink_dir, &out)
         }
 
         Commands::Export { output, format } => {
             let db = get_db()?;
             match format.as_str() {
-                "json" => commands::export::run_json(&db, output.as_deref()),
-                "markdown" | "md" => commands::export::run_markdown(&db, output.as_deref()),
+                "json" => commands::export::run_json(&db, output.as_deref(), &out),
+                "markdown" | "md" => commands::export::run_markdown(&db, output.as_deref(), &out),
                 _ => {
                     bail!("Unknown format '{}'. Use 'json' or 'markdown'", format);
                 }
@@ -561,16 +566,16 @@ fn main() -> Result<()> {
         Commands::Import { input } => {
             let db = get_db()?;
             let path = std::path::Path::new(&input);
-            commands::import::run_json(&db, path)
+            commands::import::run_json(&db, path, &out)
         }
 
         Commands::Archive { action } => {
             let db = get_db()?;
             match action {
-                ArchiveCommands::Add { id } => commands::archive::archive(&db, id),
-                ArchiveCommands::Remove { id } => commands::archive::unarchive(&db, id),
-                ArchiveCommands::List => commands::archive::list(&db),
-                ArchiveCommands::Older { days } => commands::archive::archive_older(&db, days),
+                ArchiveCommands::Add { id } => commands::archive::archive(&db, id, &out),
+                ArchiveCommands::Remove { id } => commands::archive::unarchive(&db, id, &out),
+                ArchiveCommands::List => commands::archive::list(&db, &out),
+                ArchiveCommands::Older { days } => commands::archive::archive_older(&db, days, &out),
             }
         }
 
@@ -578,27 +583,27 @@ fn main() -> Result<()> {
             let db = get_db()?;
             match action {
                 MilestoneCommands::Create { name, description } => {
-                    commands::milestone::create(&db, &name, description.as_deref())
+                    commands::milestone::create(&db, &name, description.as_deref(), &out)
                 }
-                MilestoneCommands::List { status } => commands::milestone::list(&db, Some(&status)),
-                MilestoneCommands::Show { id } => commands::milestone::show(&db, id),
-                MilestoneCommands::Add { id, issues } => commands::milestone::add(&db, id, &issues),
+                MilestoneCommands::List { status } => commands::milestone::list(&db, Some(&status), &out),
+                MilestoneCommands::Show { id } => commands::milestone::show(&db, id, &out),
+                MilestoneCommands::Add { id, issues } => commands::milestone::add(&db, id, &issues, &out),
                 MilestoneCommands::Remove { id, issue } => {
-                    commands::milestone::remove(&db, id, issue)
+                    commands::milestone::remove(&db, id, issue, &out)
                 }
-                MilestoneCommands::Close { id } => commands::milestone::close(&db, id),
-                MilestoneCommands::Delete { id } => commands::milestone::delete(&db, id),
+                MilestoneCommands::Close { id } => commands::milestone::close(&db, id, &out),
+                MilestoneCommands::Delete { id } => commands::milestone::delete(&db, id, &out),
             }
         }
 
         Commands::Session { action } => {
             let db = get_db()?;
             match action {
-                SessionCommands::Start => commands::session::start(&db),
-                SessionCommands::End { notes } => commands::session::end(&db, notes.as_deref()),
-                SessionCommands::Status => commands::session::status(&db),
-                SessionCommands::Work { id } => commands::session::work(&db, id),
-                SessionCommands::LastHandoff => commands::session::last_handoff(&db),
+                SessionCommands::Start => commands::session::start(&db, &out),
+                SessionCommands::End { notes } => commands::session::end(&db, notes.as_deref(), &out),
+                SessionCommands::Status => commands::session::status(&db, &out),
+                SessionCommands::Work { id } => commands::session::work(&db, id, &out),
+                SessionCommands::LastHandoff => commands::session::last_handoff(&db, &out),
             }
         }
 

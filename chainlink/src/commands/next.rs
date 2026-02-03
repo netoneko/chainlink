@@ -1,8 +1,17 @@
-use anyhow::Result;
+use crate::commands::CmdResult;
 
-use chainlink::backend::DatabaseBackend;
-use chainlink::db::Database;
-use chainlink::models::Issue;
+#[cfg(not(feature = "std"))]
+use alloc::format;
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
+use crate::backend::DatabaseBackend;
+use crate::db::Database;
+use crate::models::Issue;
+use crate::out_println;
+use crate::output::Output;
 
 /// Progress tuple: (completed subissues, total subissues)
 type Progress = Option<(i32, i32)>;
@@ -22,7 +31,7 @@ fn priority_weight(priority: &str) -> i32 {
 }
 
 /// Calculate progress for issues with subissues
-fn calculate_progress<B: DatabaseBackend>(db: &Database<B>, issue: &Issue) -> Result<Progress> {
+fn calculate_progress<B: DatabaseBackend>(db: &Database<B>, issue: &Issue) -> CmdResult<Progress> {
     let subissues = db.get_subissues(issue.id)?;
     if subissues.is_empty() {
         return Ok(None);
@@ -33,12 +42,13 @@ fn calculate_progress<B: DatabaseBackend>(db: &Database<B>, issue: &Issue) -> Re
     Ok(Some((closed, total)))
 }
 
-pub fn run<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
+pub fn run<B: DatabaseBackend>(db: &Database<B>, out: &impl Output) -> CmdResult<()> {
     let ready = db.list_ready_issues()?;
 
     if ready.is_empty() {
-        println!("No issues ready to work on.");
-        println!(
+        out_println!(out, "No issues ready to work on.");
+        out_println!(
+            out,
             "Use 'chainlink list' to see all issues or 'chainlink blocked' to see blocked issues."
         );
         return Ok(());
@@ -73,45 +83,46 @@ pub fn run<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
         // All ready issues are subissues, show them instead
         let ready = db.list_ready_issues()?;
         if let Some(issue) = ready.first() {
-            println!("Next: #{} [{}] {}", issue.id, issue.priority, issue.title);
+            out_println!(out, "Next: #{} [{}] {}", issue.id, issue.priority, issue.title);
             if let Some(parent_id) = issue.parent_id {
-                println!("       (subissue of #{})", parent_id);
+                out_println!(out, "       (subissue of #{})", parent_id);
             }
         } else {
-            println!("No issues ready to work on.");
+            out_println!(out, "No issues ready to work on.");
         }
         return Ok(());
     }
 
     // Recommend the top issue
     let (top, _score, progress) = &scored[0];
-    println!("Next: #{} [{}] {}", top.id, top.priority, top.title);
+    out_println!(out, "Next: #{} [{}] {}", top.id, top.priority, top.title);
 
     if let Some((closed, total)) = progress {
-        println!("       Progress: {}/{} subissues complete", closed, total);
+        out_println!(out, "       Progress: {}/{} subissues complete", closed, total);
     }
 
     if let Some(desc) = &top.description {
         if !desc.is_empty() {
             let preview: String = desc.chars().take(80).collect();
             let suffix = if desc.len() > 80 { "..." } else { "" };
-            println!("       {}{}", preview, suffix);
+            out_println!(out, "       {}{}", preview, suffix);
         }
     }
 
-    println!();
-    println!("Run: chainlink session work {}", top.id);
+    out_println!(out, "");
+    out_println!(out, "Run: chainlink session work {}", top.id);
 
     // Show runners-up if any
     if scored.len() > 1 {
-        println!();
-        println!("Also ready:");
+        out_println!(out, "");
+        out_println!(out, "Also ready:");
         for (issue, _score, progress) in scored.iter().skip(1).take(3) {
             let progress_str = match progress {
                 Some((c, t)) => format!(" ({}/{})", c, t),
                 None => String::new(),
             };
-            println!(
+            out_println!(
+                out,
                 "  #{} [{}] {}{}",
                 issue.id, issue.priority, issue.title, progress_str
             );
@@ -124,7 +135,8 @@ pub fn run<B: DatabaseBackend>(db: &Database<B>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chainlink::backend::RusqliteBackend;
+    use crate::backend::RusqliteBackend;
+    use crate::output::StdOutput;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
@@ -164,7 +176,7 @@ mod tests {
     fn test_run_no_issues() {
         let (db, _dir) = setup_test_db();
 
-        let result = run(&db);
+        let result = run(&db, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -173,7 +185,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         db.create_issue("Issue 1", None, "high").unwrap();
 
-        let result = run(&db);
+        let result = run(&db, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -185,7 +197,7 @@ mod tests {
             .unwrap();
         db.create_issue("Medium priority", None, "medium").unwrap();
 
-        let result = run(&db);
+        let result = run(&db, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -226,7 +238,7 @@ mod tests {
         let blocked = db.create_issue("Blocked", None, "critical").unwrap();
         db.add_dependency(blocked, blocker).unwrap();
 
-        let result = run(&db);
+        let result = run(&db, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -236,7 +248,7 @@ mod tests {
         let id = db.create_issue("Done", None, "medium").unwrap();
         db.close_issue(id).unwrap();
 
-        let result = run(&db);
+        let result = run(&db, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -253,7 +265,7 @@ mod tests {
             for i in 0..count {
                 db.create_issue(&format!("Issue {}", i), None, "medium").unwrap();
             }
-            let result = run(&db);
+            let result = run(&db, &StdOutput);
             prop_assert!(result.is_ok());
         }
     }

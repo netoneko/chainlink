@@ -1,7 +1,17 @@
-use anyhow::{bail, Result};
+use crate::commands::CmdResult;
+use crate::db::DbError;
 
-use chainlink::backend::DatabaseBackend;
-use chainlink::db::Database;
+use crate::backend::DatabaseBackend;
+use crate::db::Database;
+use crate::out_println;
+use crate::output::Output;
+
+#[cfg(not(feature = "std"))]
+use alloc::format;
+#[cfg(not(feature = "std"))]
+use alloc::string::{String, ToString};
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 const VALID_PRIORITIES: [&str; 4] = ["low", "medium", "high", "critical"];
 
@@ -58,15 +68,16 @@ pub fn run<B: DatabaseBackend>(
     description: Option<&str>,
     priority: &str,
     template: Option<&str>,
-) -> Result<()> {
+    out: &impl Output,
+) -> CmdResult<()> {
     // Apply template if specified
     let (final_priority, final_description, label) = if let Some(tmpl_name) = template {
         let tmpl = get_template(tmpl_name).ok_or_else(|| {
-            anyhow::anyhow!(
+            DbError::Validation(format!(
                 "Unknown template '{}'. Available: {}",
                 tmpl_name,
                 list_templates().join(", ")
-            )
+            ))
         })?;
 
         // Template priority is default, user can override
@@ -93,11 +104,11 @@ pub fn run<B: DatabaseBackend>(
     };
 
     if !validate_priority(&final_priority) {
-        bail!(
+        return Err(DbError::Validation(format!(
             "Invalid priority '{}'. Must be one of: {}",
             final_priority,
             VALID_PRIORITIES.join(", ")
-        );
+        )).into());
     }
 
     let id = db.create_issue(title, final_description.as_deref(), &final_priority)?;
@@ -107,9 +118,9 @@ pub fn run<B: DatabaseBackend>(
         db.add_label(id, lbl)?;
     }
 
-    println!("Created issue #{}", id);
+    out_println!(out, "Created issue #{}", id);
     if let Some(tmpl) = template {
-        println!("  Applied template: {}", tmpl);
+        out_println!(out, "  Applied template: {}", tmpl);
     }
     Ok(())
 }
@@ -120,23 +131,24 @@ pub fn run_subissue<B: DatabaseBackend>(
     title: &str,
     description: Option<&str>,
     priority: &str,
-) -> Result<()> {
+    out: &impl Output,
+) -> CmdResult<()> {
     if !validate_priority(priority) {
-        bail!(
+        return Err(DbError::Validation(format!(
             "Invalid priority '{}'. Must be one of: {}",
             priority,
             VALID_PRIORITIES.join(", ")
-        );
+        )).into());
     }
 
     // Verify parent exists
     let parent = db.get_issue(parent_id)?;
     if parent.is_none() {
-        bail!("Parent issue #{} not found", parent_id);
+        return Err(DbError::Validation(format!("Parent issue #{} not found", parent_id)).into());
     }
 
     let id = db.create_subissue(parent_id, title, description, priority)?;
-    println!("Created subissue #{} under #{}", id, parent_id);
+    out_println!(out, "Created subissue #{} under #{}", id, parent_id);
     Ok(())
 }
 

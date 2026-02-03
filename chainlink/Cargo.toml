@@ -17,7 +17,8 @@ required-features = ["std", "rusqlite-backend", "cli"]
 default = ["std", "rusqlite-backend", "cli"]
 std = ["chrono/std", "chrono/now", "serde/std", "serde_json/std", "anyhow/std"]
 rusqlite-backend = ["rusqlite"]
-cli = ["clap"]
+# cli requires std because some commands use std::fs
+cli = ["clap", "std"]
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }

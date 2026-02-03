@@ -4,15 +4,18 @@ use std::fs;
 use std::path::Path;
 
 use super::export::{ExportData, ExportedIssue};
-use chainlink::backend::DatabaseBackend;
-use chainlink::db::Database;
+use crate::backend::DatabaseBackend;
+use crate::db::Database;
+use crate::out_println;
+use crate::output::Output;
 
-pub fn run_json<B: DatabaseBackend>(db: &Database<B>, input_path: &Path) -> Result<()> {
+pub fn run_json<B: DatabaseBackend>(db: &Database<B>, input_path: &Path, out: &impl Output) -> Result<()> {
     let content = fs::read_to_string(input_path).context("Failed to read import file")?;
 
     let data: ExportData = serde_json::from_str(&content).context("Failed to parse JSON")?;
 
-    println!(
+    out_println!(
+        out,
         "Importing {} issues from {}",
         data.issues.len(),
         input_path.display()
@@ -26,7 +29,7 @@ pub fn run_json<B: DatabaseBackend>(db: &Database<B>, input_path: &Path) -> Resu
 
         // First pass: create all issues without parent relationships
         for issue in &data.issues {
-            let new_id = import_issue_internal(db, issue, None)?;
+            let new_id = import_issue_internal(db, issue, None, out)?;
             id_map.insert(issue.id, new_id);
         }
 
@@ -45,11 +48,11 @@ pub fn run_json<B: DatabaseBackend>(db: &Database<B>, input_path: &Path) -> Resu
         Ok(data.issues.len())
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    println!("Successfully imported {} issues", count);
+    out_println!(out, "Successfully imported {} issues", count);
     Ok(())
 }
 
-fn import_issue_internal<B: DatabaseBackend>(db: &Database<B>, issue: &ExportedIssue, parent_id: Option<i64>) -> chainlink::db::Result<i64> {
+fn import_issue_internal<B: DatabaseBackend>(db: &Database<B>, issue: &ExportedIssue, parent_id: Option<i64>, out: &impl Output) -> crate::db::Result<i64> {
     let id = if let Some(pid) = parent_id {
         db.create_subissue(
             pid,
@@ -76,7 +79,7 @@ fn import_issue_internal<B: DatabaseBackend>(db: &Database<B>, issue: &ExportedI
         db.close_issue(id)?;
     }
 
-    println!("  Imported: #{} -> #{} {}", issue.id, id, issue.title);
+    out_println!(out, "  Imported: #{} -> #{} {}", issue.id, id, issue.title);
     Ok(id)
 }
 
@@ -84,7 +87,8 @@ fn import_issue_internal<B: DatabaseBackend>(db: &Database<B>, issue: &ExportedI
 mod tests {
     use super::super::export::{ExportData, ExportedIssue};
     use super::*;
-    use chainlink::backend::RusqliteBackend;
+    use crate::backend::RusqliteBackend;
+    use crate::output::StdOutput;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
@@ -126,7 +130,7 @@ mod tests {
         let json = create_test_export(vec![make_issue(1, "Test issue", None, "open")]);
         let import_path = dir.path().join("import.json");
         fs::write(&import_path, json).unwrap();
-        let result = run_json(&db, &import_path);
+        let result = run_json(&db, &import_path, &StdOutput);
         assert!(result.is_ok());
         let issues = db.list_issues(Some("all"), None, None).unwrap();
         assert_eq!(issues.len(), 1);
@@ -141,7 +145,7 @@ mod tests {
         ]);
         let import_path = dir.path().join("import.json");
         fs::write(&import_path, json).unwrap();
-        run_json(&db, &import_path).unwrap();
+        run_json(&db, &import_path, &StdOutput).unwrap();
         let issues = db.list_issues(Some("all"), None, None).unwrap();
         assert_eq!(issues.len(), 2);
     }
@@ -152,7 +156,7 @@ mod tests {
         let json = create_test_export(vec![make_issue(1, "Closed", None, "closed")]);
         let import_path = dir.path().join("import.json");
         fs::write(&import_path, json).unwrap();
-        run_json(&db, &import_path).unwrap();
+        run_json(&db, &import_path, &StdOutput).unwrap();
         let issues = db.list_issues(Some("closed"), None, None).unwrap();
         assert_eq!(issues.len(), 1);
     }
@@ -165,7 +169,7 @@ mod tests {
         let json = create_test_export(vec![issue]);
         let import_path = dir.path().join("import.json");
         fs::write(&import_path, json).unwrap();
-        run_json(&db, &import_path).unwrap();
+        run_json(&db, &import_path, &StdOutput).unwrap();
         let issues = db.list_issues(Some("all"), None, None).unwrap();
         let labels = db.get_labels(issues[0].id).unwrap();
         assert!(labels.contains(&"bug".to_string()));
@@ -176,7 +180,7 @@ mod tests {
         let (db, dir) = setup_test_db();
         let import_path = dir.path().join("invalid.json");
         fs::write(&import_path, "not valid json").unwrap();
-        let result = run_json(&db, &import_path);
+        let result = run_json(&db, &import_path, &StdOutput);
         assert!(result.is_err());
     }
 
@@ -184,7 +188,7 @@ mod tests {
     fn test_import_missing_file() {
         let (db, dir) = setup_test_db();
         let import_path = dir.path().join("nonexistent.json");
-        let result = run_json(&db, &import_path);
+        let result = run_json(&db, &import_path, &StdOutput);
         assert!(result.is_err());
     }
 
@@ -194,7 +198,7 @@ mod tests {
         let json = create_test_export(vec![]);
         let import_path = dir.path().join("import.json");
         fs::write(&import_path, json).unwrap();
-        let result = run_json(&db, &import_path);
+        let result = run_json(&db, &import_path, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -205,7 +209,7 @@ mod tests {
             let json = create_test_export(vec![make_issue(1, &title, None, "open")]);
             let import_path = dir.path().join("import.json");
             fs::write(&import_path, json).unwrap();
-            let result = run_json(&db, &import_path);
+            let result = run_json(&db, &import_path, &StdOutput);
             prop_assert!(result.is_ok());
         }
     }

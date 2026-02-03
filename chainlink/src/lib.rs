@@ -10,7 +10,8 @@
 //! # no_std Support
 //!
 //! This crate supports `no_std` environments when compiled without the `std` feature.
-//! In this mode, you must provide your own `DatabaseBackend` implementation.
+//! In this mode, you must provide your own `DatabaseBackend` implementation and
+//! implement the `Output` trait for custom output handling.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -18,6 +19,8 @@
 extern crate alloc;
 
 pub mod backend;
+pub mod commands;
 pub mod db;
 pub mod models;
+pub mod output;
 pub mod utils;

@@ -1,26 +1,33 @@
-use anyhow::Result;
+use crate::commands::CmdResult;
 
-use chainlink::backend::DatabaseBackend;
-use chainlink::db::Database;
-use chainlink::utils::truncate;
+use crate::backend::DatabaseBackend;
+use crate::db::Database;
+use crate::out_println;
+use crate::output::Output;
+use crate::utils::truncate;
+
+#[cfg(not(feature = "std"))]
+use alloc::format;
 
 pub fn run<B: DatabaseBackend>(
     db: &Database<B>,
     status: Option<&str>,
     label: Option<&str>,
     priority: Option<&str>,
-) -> Result<()> {
+    out: &impl Output,
+) -> CmdResult<()> {
     let issues = db.list_issues(status, label, priority)?;
 
     if issues.is_empty() {
-        println!("No issues found.");
+        out_println!(out, "No issues found.");
         return Ok(());
     }
 
     for issue in issues {
         let status_display = format!("[{}]", issue.status);
         let date = issue.created_at.format("%Y-%m-%d");
-        println!(
+        out_println!(
+            out,
             "#{:<4} {:8} {:<40} {:8} {}",
             issue.id,
             status_display,
@@ -36,7 +43,8 @@ pub fn run<B: DatabaseBackend>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chainlink::backend::RusqliteBackend;
+    use crate::backend::RusqliteBackend;
+    use crate::output::StdOutput;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
@@ -97,7 +105,7 @@ mod tests {
     #[test]
     fn test_run_empty() {
         let (db, _dir) = setup_test_db();
-        let result = run(&db, None, None, None);
+        let result = run(&db, None, None, None, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -108,7 +116,7 @@ mod tests {
         db.create_issue("Issue 2", None, "medium").unwrap();
         db.create_issue("Issue 3", None, "low").unwrap();
 
-        let result = run(&db, None, None, None);
+        let result = run(&db, None, None, None, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -123,7 +131,7 @@ mod tests {
         assert!(issues.iter().any(|i| i.id == id1));
         assert!(!issues.iter().any(|i| i.id == id2));
 
-        let result = run(&db, Some("open"), None, None);
+        let result = run(&db, Some("open"), None, None, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -138,18 +146,18 @@ mod tests {
         assert!(!issues.iter().any(|i| i.id == id1));
         assert!(issues.iter().any(|i| i.id == id2));
 
-        let result = run(&db, Some("closed"), None, None);
+        let result = run(&db, Some("closed"), None, None, &StdOutput);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_run_status_filter_all() {
         let (db, _dir) = setup_test_db();
-        let id1 = db.create_issue("Open issue", None, "medium").unwrap();
+        let _id1 = db.create_issue("Open issue", None, "medium").unwrap();
         let id2 = db.create_issue("Closed issue", None, "medium").unwrap();
         db.close_issue(id2).unwrap();
 
-        let result = run(&db, Some("all"), None, None);
+        let result = run(&db, Some("all"), None, None, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -165,7 +173,7 @@ mod tests {
         assert!(issues.iter().any(|i| i.id == id1));
         assert!(!issues.iter().any(|i| i.id == id2));
 
-        let result = run(&db, None, Some("bug"), None);
+        let result = run(&db, None, Some("bug"), None, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -179,7 +187,7 @@ mod tests {
         assert!(issues.iter().any(|i| i.id == id1));
         assert!(!issues.iter().any(|i| i.id == id2));
 
-        let result = run(&db, None, None, Some("high"));
+        let result = run(&db, None, None, Some("high"), &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -200,7 +208,7 @@ mod tests {
         assert!(!issues.iter().any(|i| i.id == id2));
         assert!(!issues.iter().any(|i| i.id == id3));
 
-        let result = run(&db, Some("open"), Some("bug"), Some("high"));
+        let result = run(&db, Some("open"), Some("bug"), Some("high"), &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -210,7 +218,7 @@ mod tests {
         let long_title = "A".repeat(100);
         db.create_issue(&long_title, None, "medium").unwrap();
 
-        let result = run(&db, None, None, None);
+        let result = run(&db, None, None, None, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -220,7 +228,7 @@ mod tests {
         db.create_issue("日本語タイトル 🎉", None, "medium")
             .unwrap();
 
-        let result = run(&db, None, None, None);
+        let result = run(&db, None, None, None, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -229,7 +237,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         db.create_issue("Issue", None, "medium").unwrap();
 
-        let result = run(&db, None, Some("nonexistent-label"), None);
+        let result = run(&db, None, Some("nonexistent-label"), None, &StdOutput);
         assert!(result.is_ok());
     }
 
@@ -272,7 +280,7 @@ mod tests {
             for i in 0..count {
                 db.create_issue(&format!("Issue {}", i), None, "medium").unwrap();
             }
-            let result = run(&db, None, None, None);
+            let result = run(&db, None, None, None, &StdOutput);
             prop_assert!(result.is_ok());
         }
 
@@ -280,7 +288,7 @@ mod tests {
         fn prop_run_with_filters(status in "open|closed|all", priority in "low|medium|high|critical") {
             let (db, _dir) = setup_test_db();
             db.create_issue("Test", None, &priority).unwrap();
-            let result = run(&db, Some(&status), None, Some(&priority));
+            let result = run(&db, Some(&status), None, Some(&priority), &StdOutput);
             prop_assert!(result.is_ok());
         }
     }

@@ -1,26 +1,28 @@
-use anyhow::Result;
+use crate::commands::CmdResult;
 
-use chainlink::backend::DatabaseBackend;
-use chainlink::db::Database;
+use crate::backend::DatabaseBackend;
+use crate::db::Database;
+use crate::out_println;
+use crate::output::Output;
 
-pub fn add<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, label: &str) -> Result<()> {
+pub fn add<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, label: &str, out: &impl Output) -> CmdResult<()> {
     db.require_issue(issue_id)?;
 
     if db.add_label(issue_id, label)? {
-        println!("Added label '{}' to issue #{}", label, issue_id);
+        out_println!(out, "Added label '{}' to issue #{}", label, issue_id);
     } else {
-        println!("Label '{}' already exists on issue #{}", label, issue_id);
+        out_println!(out, "Label '{}' already exists on issue #{}", label, issue_id);
     }
     Ok(())
 }
 
-pub fn remove<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, label: &str) -> Result<()> {
+pub fn remove<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, label: &str, out: &impl Output) -> CmdResult<()> {
     db.require_issue(issue_id)?;
 
     if db.remove_label(issue_id, label)? {
-        println!("Removed label '{}' from issue #{}", label, issue_id);
+        out_println!(out, "Removed label '{}' from issue #{}", label, issue_id);
     } else {
-        println!("Label '{}' not found on issue #{}", label, issue_id);
+        out_println!(out, "Label '{}' not found on issue #{}", label, issue_id);
     }
     Ok(())
 }
@@ -28,7 +30,8 @@ pub fn remove<B: DatabaseBackend>(db: &Database<B>, issue_id: i64, label: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chainlink::backend::RusqliteBackend;
+    use crate::backend::RusqliteBackend;
+    use crate::output::StdOutput;
     use proptest::prelude::*;
     use tempfile::tempdir;
 
@@ -46,7 +49,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        let result = add(&db, issue_id, "bug");
+        let result = add(&db, issue_id, "bug", &StdOutput);
         assert!(result.is_ok());
 
         let labels = db.get_labels(issue_id).unwrap();
@@ -57,7 +60,7 @@ mod tests {
     fn test_add_label_to_nonexistent_issue() {
         let (db, _dir) = setup_test_db();
 
-        let result = add(&db, 99999, "bug");
+        let result = add(&db, 99999, "bug", &StdOutput);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
@@ -67,8 +70,8 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        add(&db, issue_id, "bug").unwrap();
-        let result = add(&db, issue_id, "bug"); // Duplicate
+        add(&db, issue_id, "bug", &StdOutput).unwrap();
+        let result = add(&db, issue_id, "bug", &StdOutput); // Duplicate
         assert!(result.is_ok()); // Should succeed but not add duplicate
 
         let labels = db.get_labels(issue_id).unwrap();
@@ -80,9 +83,9 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        add(&db, issue_id, "bug").unwrap();
-        add(&db, issue_id, "urgent").unwrap();
-        add(&db, issue_id, "backend").unwrap();
+        add(&db, issue_id, "bug", &StdOutput).unwrap();
+        add(&db, issue_id, "urgent", &StdOutput).unwrap();
+        add(&db, issue_id, "backend", &StdOutput).unwrap();
 
         let labels = db.get_labels(issue_id).unwrap();
         assert_eq!(labels.len(), 3);
@@ -96,7 +99,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        let result = add(&db, issue_id, "");
+        let result = add(&db, issue_id, "", &StdOutput);
         assert!(result.is_ok());
 
         let labels = db.get_labels(issue_id).unwrap();
@@ -108,7 +111,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        let result = add(&db, issue_id, "バグ");
+        let result = add(&db, issue_id, "バグ", &StdOutput);
         assert!(result.is_ok());
 
         let labels = db.get_labels(issue_id).unwrap();
@@ -120,13 +123,13 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        let result = add(&db, issue_id, "high-priority");
+        let result = add(&db, issue_id, "high-priority", &StdOutput);
         assert!(result.is_ok());
 
-        let result = add(&db, issue_id, "v2.0");
+        let result = add(&db, issue_id, "v2.0", &StdOutput);
         assert!(result.is_ok());
 
-        let result = add(&db, issue_id, "team:backend");
+        let result = add(&db, issue_id, "team:backend", &StdOutput);
         assert!(result.is_ok());
 
         let labels = db.get_labels(issue_id).unwrap();
@@ -139,7 +142,7 @@ mod tests {
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
         let malicious = "'; DROP TABLE labels; --";
-        let result = add(&db, issue_id, malicious);
+        let result = add(&db, issue_id, malicious, &StdOutput);
         assert!(result.is_ok());
 
         // Verify label was stored literally
@@ -158,8 +161,8 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        add(&db, issue_id, "bug").unwrap();
-        let result = remove(&db, issue_id, "bug");
+        add(&db, issue_id, "bug", &StdOutput).unwrap();
+        let result = remove(&db, issue_id, "bug", &StdOutput);
         assert!(result.is_ok());
 
         let labels = db.get_labels(issue_id).unwrap();
@@ -171,7 +174,7 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        let result = remove(&db, issue_id, "nonexistent");
+        let result = remove(&db, issue_id, "nonexistent", &StdOutput);
         assert!(result.is_ok()); // Should succeed but report not found
     }
 
@@ -179,7 +182,7 @@ mod tests {
     fn test_remove_label_from_nonexistent_issue() {
         let (db, _dir) = setup_test_db();
 
-        let result = remove(&db, 99999, "bug");
+        let result = remove(&db, 99999, "bug", &StdOutput);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
@@ -189,11 +192,11 @@ mod tests {
         let (db, _dir) = setup_test_db();
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
 
-        add(&db, issue_id, "bug").unwrap();
-        add(&db, issue_id, "urgent").unwrap();
-        add(&db, issue_id, "backend").unwrap();
+        add(&db, issue_id, "bug", &StdOutput).unwrap();
+        add(&db, issue_id, "urgent", &StdOutput).unwrap();
+        add(&db, issue_id, "backend", &StdOutput).unwrap();
 
-        remove(&db, issue_id, "urgent").unwrap();
+        remove(&db, issue_id, "urgent", &StdOutput).unwrap();
 
         let labels = db.get_labels(issue_id).unwrap();
         assert_eq!(labels.len(), 2);
@@ -208,7 +211,7 @@ mod tests {
         let issue_id = db.create_issue("Test issue", None, "medium").unwrap();
         db.close_issue(issue_id).unwrap();
 
-        let result = add(&db, issue_id, "bug");
+        let result = add(&db, issue_id, "bug", &StdOutput);
         assert!(result.is_ok());
 
         let labels = db.get_labels(issue_id).unwrap();
@@ -223,7 +226,7 @@ mod tests {
             let (db, _dir) = setup_test_db();
             let issue_id = db.create_issue("Test", None, "medium").unwrap();
 
-            add(&db, issue_id, &label).unwrap();
+            add(&db, issue_id, &label, &StdOutput).unwrap();
 
             let labels = db.get_labels(issue_id).unwrap();
             prop_assert!(labels.contains(&label));
@@ -234,8 +237,8 @@ mod tests {
             let (db, _dir) = setup_test_db();
             let issue_id = db.create_issue("Test", None, "medium").unwrap();
 
-            add(&db, issue_id, &label).unwrap();
-            remove(&db, issue_id, &label).unwrap();
+            add(&db, issue_id, &label, &StdOutput).unwrap();
+            remove(&db, issue_id, &label, &StdOutput).unwrap();
 
             let labels = db.get_labels(issue_id).unwrap();
             prop_assert!(!labels.contains(&label));
@@ -245,10 +248,10 @@ mod tests {
         fn prop_nonexistent_issue_fails(issue_id in 1000i64..10000) {
             let (db, _dir) = setup_test_db();
 
-            let add_result = add(&db, issue_id, "label");
+            let add_result = add(&db, issue_id, "label", &StdOutput);
             prop_assert!(add_result.is_err());
 
-            let remove_result = remove(&db, issue_id, "label");
+            let remove_result = remove(&db, issue_id, "label", &StdOutput);
             prop_assert!(remove_result.is_err());
         }
 
@@ -261,12 +264,12 @@ mod tests {
 
             // Add all labels
             for label in &labels {
-                add(&db, issue_id, label).unwrap();
+                add(&db, issue_id, label, &StdOutput).unwrap();
             }
 
             // Remove first label
             if !labels.is_empty() {
-                remove(&db, issue_id, &labels[0]).unwrap();
+                remove(&db, issue_id, &labels[0], &StdOutput).unwrap();
 
                 let remaining = db.get_labels(issue_id).unwrap();
                 prop_assert!(!remaining.contains(&labels[0]));
@@ -287,7 +290,7 @@ mod tests {
             let (db, _dir) = setup_test_db();
             let issue_id = db.create_issue("Test", None, "medium").unwrap();
 
-            let result = add(&db, issue_id, &label);
+            let result = add(&db, issue_id, &label, &StdOutput);
             prop_assert!(result.is_ok());
 
             let labels = db.get_labels(issue_id).unwrap();
